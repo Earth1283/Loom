@@ -203,6 +203,105 @@ function initEditor() {
       }
     });
 
+    // Register quick-fix provider
+    monaco.languages.registerCodeActionProvider('loom', {
+      provideCodeActions(model, range, context) {
+        // Use getModelMarkers so fixes appear even when 1-char markers don't overlap the cursor column exactly.
+        const markers = monaco.editor.getModelMarkers({ resource: model.uri, owner: 'loom' })
+          .filter(m => m.startLineNumber <= range.endLineNumber && m.endLineNumber >= range.startLineNumber);
+
+        const actions = [];
+
+        function singleLineEdit(title, marker, ln, startCol, endCol, text, preferred = true) {
+          actions.push({
+            title,
+            kind: 'quickfix',
+            diagnostics: [marker],
+            isPreferred: preferred,
+            edit: {
+              edits: [{
+                resource: model.uri,
+                versionId: model.getVersionId(),
+                textEdit: { range: new monaco.Range(ln, startCol, ln, endCol), text }
+              }]
+            }
+          });
+        }
+
+        function deleteLines(title, marker, startLn, endLn) {
+          actions.push({
+            title,
+            kind: 'quickfix',
+            diagnostics: [marker],
+            isPreferred: true,
+            edit: {
+              edits: [{
+                resource: model.uri,
+                versionId: model.getVersionId(),
+                textEdit: { range: new monaco.Range(startLn, 1, endLn + 1, 1), text: '' }
+              }]
+            }
+          });
+        }
+
+        for (const marker of markers) {
+          const msg = marker.message;
+          const ln  = marker.startLineNumber;
+          const line = model.getLineContent(ln);
+
+          // Event name typo: "Unknown event 'X' — did you mean 'Y'?"
+          const typoMatch = msg.match(/Unknown event '(\w+)'.*did you mean '(\w+)'/);
+          if (typoMatch) {
+            const [, wrong, right] = typoMatch;
+            const idx = line.indexOf(wrong);
+            if (idx !== -1)
+              singleLineEdit(`Rename to '${right}'`, marker, ln, idx + 1, idx + 1 + wrong.length, right);
+            continue;
+          }
+
+          // Double negation: "Double negation 'not not x'"
+          if (msg.includes('Double negation')) {
+            const m = line.match(/^(\s*)(not\s+not\s+|!!)(.*)/);
+            if (m)
+              singleLineEdit('Remove double negation', marker, ln, 1, line.length + 1, m[1] + m[3]);
+          }
+
+          // not (a == b) → a != b
+          if (msg.includes("can be written as 'a != b'")) {
+            const m = line.match(/not\s*\(([^)]+)==([^)]+)\)/);
+            if (m) {
+              const idx = line.indexOf(m[0]);
+              const l = m[1].trim(), r = m[2].trim();
+              singleLineEdit(`Simplify to '${l} != ${r}'`, marker, ln, idx + 1, idx + 1 + m[0].length, `${l} != ${r}`);
+            }
+          }
+
+          // not (a != b) → a == b
+          if (msg.includes("can be written as 'a == b'")) {
+            const m = line.match(/not\s*\(([^)]+)!=([^)]+)\)/);
+            if (m) {
+              const idx = line.indexOf(m[0]);
+              const l = m[1].trim(), r = m[2].trim();
+              singleLineEdit(`Simplify to '${l} == ${r}'`, marker, ln, idx + 1, idx + 1 + m[0].length, `${l} == ${r}`);
+            }
+          }
+
+          // No-op compound assignments: x += 0, x -= 0, x *= 1
+          if (msg.includes('has no effect') &&
+              (msg.includes('+= 0') || msg.includes('-= 0') || msg.includes('*= 1'))) {
+            deleteLines('Remove no-op statement', marker, ln, ln);
+          }
+
+          // Self-assignment: x = x has no effect
+          if (msg.includes('Self-assignment') && msg.includes('has no effect')) {
+            deleteLines('Remove self-assignment', marker, ln, ln);
+          }
+        }
+
+        return { actions, dispose: () => {} };
+      }
+    });
+
     // Validate on change (debounced)
     editor.onDidChangeModelContent(() => {
       clearTimeout(validateTimeout);
