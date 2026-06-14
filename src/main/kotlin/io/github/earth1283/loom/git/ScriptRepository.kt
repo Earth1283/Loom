@@ -27,11 +27,13 @@ class ScriptRepository(private val dir: File, private val logger: Logger) {
 
     fun init() {
         try {
-            git = if (File(dir, ".git").exists()) {
-                Git.open(dir)
+            if (File(dir, ".git").exists()) {
+                git = Git.open(dir)
+                val commitCount = try { git!!.log().call().count() } catch (_: Exception) { 0 }
+                logger.info("Opened existing git repository (${dir.name}/, $commitCount commit(s))")
             } else {
+                logger.info("Initialising new git repository in ${dir.name}/…")
                 val g = Git.init().setDirectory(dir).call()
-                // Initial commit so HEAD exists
                 val gitignore = File(dir, ".gitignore")
                 gitignore.writeText("# Loom script repository\n*.tmp\n")
                 g.add().addFilepattern(".gitignore").call()
@@ -39,7 +41,8 @@ class ScriptRepository(private val dir: File, private val logger: Logger) {
                     .setMessage("Init Loom script repository")
                     .setAuthor(ident("Loom"))
                     .call()
-                g
+                git = g
+                logger.info("Git repository created with initial commit.")
             }
         } catch (e: Exception) {
             logger.warning("Failed to init git repo: ${e.message}")

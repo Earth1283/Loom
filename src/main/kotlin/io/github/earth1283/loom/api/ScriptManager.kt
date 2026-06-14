@@ -11,19 +11,25 @@ class ScriptManager(private val plugin: Plugin, private val scriptsDir: File) {
 
     fun init() {
         scriptsDir.mkdirs()
+        plugin.logger.info("Script directory: ${scriptsDir.canonicalPath}")
         repo.init()
         loadAll()
     }
 
     fun shutdown() {
+        plugin.logger.info("Unloading ${scripts.size} script(s)…")
         scripts.values.forEach { it.unload() }
         scripts.clear()
     }
 
     fun loadAll() {
-        scriptsDir.listFiles { f -> f.extension == "loom" }?.forEach { f ->
-            load(f.nameWithoutExtension)
+        val files = scriptsDir.listFiles { f -> f.extension == "loom" } ?: return
+        if (files.isEmpty()) {
+            plugin.logger.info("No .loom scripts found in ${scriptsDir.name}/")
+            return
         }
+        plugin.logger.info("Found ${files.size} script(s) — loading…")
+        files.sortedBy { it.name }.forEach { f -> load(f.nameWithoutExtension) }
     }
 
     fun load(name: String): List<Diagnostic> {
@@ -31,7 +37,25 @@ class ScriptManager(private val plugin: Plugin, private val scriptsDir: File) {
         if (!file.exists()) return listOf()
         val script = LoomScript(name, file.readText(), plugin)
         scripts[name] = script
-        return script.load()
+        val diags = script.load()
+        val errCount  = diags.count { it.severity == Diagnostic.Severity.ERROR }
+        val warnCount = diags.count { it.severity == Diagnostic.Severity.WARNING }
+        val events = script.getEventNames()
+        val cmds   = script.getCommandNames()
+        if (script.state == LoomScript.State.RUNNING) {
+            val detail = buildList {
+                if (events.isNotEmpty()) add("${events.size} event(s)")
+                if (cmds.isNotEmpty())   add("${cmds.size} command(s)")
+            }.ifEmpty { listOf("no handlers") }.joinToString(", ")
+            if (warnCount > 0)
+                plugin.logger.warning("  [WARN ]  $name.loom — $detail  ($warnCount warning(s))")
+            else
+                plugin.logger.info("  [OK   ]  $name.loom — $detail")
+        } else {
+            val errMsg = script.lastError ?: "unknown error"
+            plugin.logger.warning("  [ERROR]  $name.loom — $errMsg")
+        }
+        return diags
     }
 
     fun unload(name: String) {
