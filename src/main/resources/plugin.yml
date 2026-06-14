@@ -6,3 +6,19 @@ api-version: '1.21'
 load: STARTUP
 
 authors: [ Earth1283 ]
+description: A lightweight scripting language for Minecraft with a web-based IDE
+
+commands:
+  loom:
+    description: Loom scripting language commands
+    usage: /loom <subcommand> [args]
+    permission: loom.use
+    aliases: [ ls ]
+
+permissions:
+  loom.use:
+    description: Use Loom commands
+    default: op
+  loom.admin:
+    description: Full Loom admin access
+    default: op
