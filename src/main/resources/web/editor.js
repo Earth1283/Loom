@@ -39,6 +39,7 @@ let ws             = null;
 let validateTimer  = null;
 let unreachDecs    = null;
 const editorModels = {};   // { name: ITextModel }
+const pendingOpens = new Set(); // guard against concurrent openTab calls for same name
 
 // ── Utils ─────────────────────────────────────────────────────────
 function esc(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -48,14 +49,20 @@ function el(id)  { return document.getElementById(id); }
 // ── Tabs ──────────────────────────────────────────────────────────
 async function openTab(name) {
   if (S.tabs.find(t => t.name === name)) { activateTab(name); return; }
+  if (pendingOpens.has(name)) return;
+  pendingOpens.add(name);
   try {
     const data = await API.get('/scripts/' + name);
-    S.tabs.push({ name, dirty: false });
-    if (window.monaco) _createModel(name, data.source);
+    if (!S.tabs.find(t => t.name === name)) {
+      S.tabs.push({ name, dirty: false });
+      if (window.monaco) _createModel(name, data.source);
+    }
     activateTab(name);
     await loadGitLog(name);
   } catch (err) {
     toast('Cannot open ' + name + ': ' + err.message, 'e');
+  } finally {
+    pendingOpens.delete(name);
   }
 }
 
