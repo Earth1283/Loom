@@ -534,9 +534,11 @@ class WebServer(
       font-size: 12px; font-family: var(--font-mono); line-height: 1.7;
     }
 
-    .diag-error   { color: var(--error); }
-    .diag-warning { color: var(--warn); }
-    .diag-info    { color: var(--text-2); }
+    .diag-error       { color: var(--error); }
+    .diag-warning     { color: var(--warn); }
+    .diag-info        { color: var(--text-2); }
+    .diag-unreachable { color: var(--text-3); font-style: italic; }
+    .loom-unreachable { opacity: 0.38; }
 
     /* ── Git log ───────────────────────────────────────────────── */
     .commit-item {

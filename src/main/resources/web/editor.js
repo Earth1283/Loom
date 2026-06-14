@@ -38,6 +38,7 @@ let ws = null;
 let currentScript = null;
 let diagnosticDecorations = [];
 let validateTimeout = null;
+let unreachableCollection = null;
 
 // Modal dialogs
 function showDialog({ message, input = false, defaultValue = '', okLabel = 'OK', dangerOk = false }) {
@@ -163,6 +164,8 @@ function initEditor() {
       cursorBlinking: 'smooth',
       cursorSmoothCaretAnimation: 'on',
     });
+
+    unreachableCollection = editor.createDecorationsCollection([]);
 
     // Register completion provider
     monaco.languages.registerCompletionItemProvider('loom', {
@@ -436,7 +439,18 @@ function showDiagnostics(diags) {
   const model = editor.getModel();
   if (!model) return;
 
-  const markers = diags.map(d => ({
+  const unreachable = diags.filter(d => d.severity === 'UNREACHABLE');
+  const regular     = diags.filter(d => d.severity !== 'UNREACHABLE');
+
+  // Apply grey-out decorations for unreachable ranges
+  if (unreachableCollection) {
+    unreachableCollection.set(unreachable.map(d => ({
+      range: new monaco.Range(d.line, 1, d.endLine || d.line, 1000),
+      options: { inlineClassName: 'loom-unreachable', isWholeLine: true }
+    })));
+  }
+
+  const markers = regular.map(d => ({
     severity: d.severity === 'ERROR' ? monaco.MarkerSeverity.Error
       : d.severity === 'WARNING' ? monaco.MarkerSeverity.Warning
       : monaco.MarkerSeverity.Info,
@@ -450,14 +464,16 @@ function showDiagnostics(diags) {
   monaco.editor.setModelMarkers(model, 'loom', markers);
 
   const diagEl = document.getElementById('tab-diagnostics');
-  if (diags.length === 0) {
-    diagEl.innerHTML = '<span style="color:#888">No problems detected.</span>';
+  const allDisplayed = [...regular, ...unreachable];
+  if (allDisplayed.length === 0) {
+    diagEl.innerHTML = '<span style="color:var(--text-3)">No problems detected.</span>';
   } else {
-    diagEl.innerHTML = diags.map(d =>
+    diagEl.innerHTML = allDisplayed.map(d =>
       `<div class="diag-${d.severity.toLowerCase()}">` +
       `[${d.line}:${d.col}] ${escHtml(d.message)}</div>`
     ).join('');
-    showTab('diagnostics');
+    // Only auto-switch to diagnostics tab if there are real errors/warnings, not just unreachable hints
+    if (regular.length > 0) showTab('diagnostics');
   }
 }
 

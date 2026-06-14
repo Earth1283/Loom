@@ -27,7 +27,7 @@ data class Diagnostic(
     val severity: Severity
 ) {
     @Serializable
-    enum class Severity { ERROR, WARNING, INFO }
+    enum class Severity { ERROR, WARNING, INFO, UNREACHABLE }
 }
 
 fun LoomError.toDiagnostic(): Diagnostic? = when (this) {

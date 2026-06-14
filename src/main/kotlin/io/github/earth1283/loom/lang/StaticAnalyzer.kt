@@ -55,14 +55,28 @@ class StaticAnalyzer {
         val seenEvents = mutableSetOf<String>()
         val seenCommands = mutableSetOf<String>()
         var terminator: Stmt? = null
+        var firstUnreachable: Stmt? = null
+        var lastUnreachable: Stmt? = null
 
         for (stmt in stmts) {
             if (terminator != null) {
-                warn(stmt.line, stmt.col, "Unreachable code after '${terminatorLabel(terminator)}'")
-                break
+                if (firstUnreachable == null) firstUnreachable = stmt
+                lastUnreachable = stmt
+            } else {
+                analyzeStmt(stmt, inLoop, inCallable, seenEvents, seenCommands, depth, innerVars)
+                if (stmt is Stmt.Return || stmt is Stmt.Break || stmt is Stmt.Continue) terminator = stmt
             }
-            analyzeStmt(stmt, inLoop, inCallable, seenEvents, seenCommands, depth, innerVars)
-            if (stmt is Stmt.Return || stmt is Stmt.Break || stmt is Stmt.Continue) terminator = stmt
+        }
+
+        val first = firstUnreachable
+        val last  = lastUnreachable
+        val term  = terminator
+        if (first != null && last != null && term != null) {
+            diagnostics.add(Diagnostic(
+                first.line, first.col, last.line, 999,
+                "Unreachable code after '${terminatorLabel(term)}'",
+                Diagnostic.Severity.UNREACHABLE
+            ))
         }
 
         // Unused local variable check
