@@ -147,6 +147,24 @@ class ScriptRepository(private val dir: File, private val logger: Logger) {
         }
     }
 
+    fun rename(oldFilename: String, newFilename: String, message: String, author: String = "Loom"): CommitInfo? {
+        val g = git ?: return null
+        return try {
+            // The file is already moved on disk; stage only the index deletion (cached=true)
+            // so JGit doesn't try to delete a working-tree path that no longer exists.
+            g.rm().setCached(true).addFilepattern(oldFilename).call()
+            g.add().addFilepattern(newFilename).call()
+            val commit = g.commit()
+                .setMessage(message)
+                .setAuthor(ident(author))
+                .call()
+            commit.toInfo()
+        } catch (e: Exception) {
+            logger.warning("Git rename commit failed: ${e.message}")
+            null
+        }
+    }
+
     fun resetFile(filename: String): Boolean {
         val g = git ?: return false
         return try {

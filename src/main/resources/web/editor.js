@@ -1,545 +1,908 @@
-// Loom Web Editor — Monaco integration + API client
+// ================================================================
+//  Loom Web Editor  ·  editor.js
+// ================================================================
 
+// ── API client ───────────────────────────────────────────────────
 const API = {
   sessionId: null,
-
-  headers() {
+  _h() {
     return { 'Content-Type': 'application/json', 'X-Session-Id': this.sessionId || '' };
   },
-
-  async get(path) {
-    const r = await fetch(path, { headers: this.headers() });
-    if (!r.ok) throw new Error(await r.text());
+  async _req(url, opts) {
+    const r = await fetch(url, { headers: this._h(), ...opts });
+    if (!r.ok) { const t = await r.text(); throw new Error(t || r.statusText); }
     return r.json();
   },
-
-  async post(path, body) {
-    const r = await fetch(path, { method: 'POST', headers: this.headers(), body: JSON.stringify(body) });
-    if (!r.ok) throw new Error(await r.text());
-    return r.json();
-  },
-
-  async put(path, body) {
-    const r = await fetch(path, { method: 'PUT', headers: this.headers(), body: JSON.stringify(body) });
-    if (!r.ok) throw new Error(await r.text());
-    return r.json();
-  },
-
-  async delete(path) {
-    const r = await fetch(path, { method: 'DELETE', headers: this.headers() });
-    if (!r.ok) throw new Error(await r.text());
-    return r.json();
-  }
+  get(p)    { return this._req(p); },
+  post(p,b) { return this._req(p, { method:'POST',  body: JSON.stringify(b) }); },
+  put(p,b)  { return this._req(p, { method:'PUT',   body: JSON.stringify(b) }); },
+  del(p)    { return this._req(p, { method:'DELETE' }); },
 };
 
-// State
-let editor = null;
-let ws = null;
-let currentScript = null;
-let diagnosticDecorations = [];
-let validateTimeout = null;
-let unreachableCollection = null;
+// ── State ────────────────────────────────────────────────────────
+const S = {
+  player: '',
+  tabs: [],          // [{ name, dirty }]
+  activeTab: null,
+  activity: 'files',
+  sidebarOpen: true,
+  scripts: [],       // [{ name, state }]
+  scriptStates: {},  // { name: state }
+  filter: '',
+  bottomTab: 'problems',
+  diagCounts: { errors: 0, warnings: 0 },
+};
 
-// Modal dialogs
-function showDialog({ message, input = false, defaultValue = '', okLabel = 'OK', dangerOk = false }) {
-  return new Promise(resolve => {
-    const overlay  = document.getElementById('modal-overlay');
-    const msgEl    = document.getElementById('modal-message');
-    const inputEl  = document.getElementById('modal-input');
-    const okBtn    = document.getElementById('modal-ok');
-    const cancelBtn = document.getElementById('modal-cancel');
+// Monaco handles
+let editor         = null;
+let ws             = null;
+let validateTimer  = null;
+let unreachDecs    = null;
+const editorModels = {};   // { name: ITextModel }
 
-    msgEl.textContent  = message;
-    okBtn.textContent  = okLabel;
-    okBtn.className    = 'btn ' + (dangerOk ? 'btn-danger' : 'btn-primary');
+// ── Utils ─────────────────────────────────────────────────────────
+function esc(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escJ(s) { return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+function el(id)  { return document.getElementById(id); }
 
-    inputEl.style.display = input ? '' : 'none';
-    if (input) { inputEl.value = defaultValue; }
+// ── Tabs ──────────────────────────────────────────────────────────
+async function openTab(name) {
+  if (S.tabs.find(t => t.name === name)) { activateTab(name); return; }
+  try {
+    const data = await API.get('/scripts/' + name);
+    S.tabs.push({ name, dirty: false });
+    if (window.monaco) _createModel(name, data.source);
+    activateTab(name);
+    await loadGitLog(name);
+  } catch (err) {
+    toast('Cannot open ' + name + ': ' + err.message, 'e');
+  }
+}
 
+function _createModel(name, source) {
+  if (editorModels[name] && !editorModels[name].isDisposed()) return editorModels[name];
+  const uri = monaco.Uri.parse('loom://scripts/' + name + '.loom');
+  const stale = monaco.editor.getModel(uri);
+  if (stale) stale.dispose();
+  const model = monaco.editor.createModel(source, 'loom', uri);
+  model.onDidChangeContent(() => {
+    _markDirty(name, true);
+    clearTimeout(validateTimer);
+    validateTimer = setTimeout(validateCurrent, 600);
+  });
+  editorModels[name] = model;
+  return model;
+}
+
+function activateTab(name) {
+  S.activeTab = name;
+  const model = editorModels[name];
+  if (editor && model) editor.setModel(model);
+  renderTabs();
+  updateBreadcrumb();
+  updateStatusBar();
+  document.querySelectorAll('.script-item').forEach(
+    e => e.classList.toggle('active', e.dataset.name === name)
+  );
+  if (name) validateCurrent();
+}
+
+function closeTab(name, ev) {
+  ev && ev.stopPropagation();
+  const tab = S.tabs.find(t => t.name === name);
+  if (tab && tab.dirty) {
+    if (!confirm(name + '.loom has unsaved changes. Close anyway?')) return;
+  }
+  const model = editorModels[name];
+  if (model) { model.dispose(); delete editorModels[name]; }
+  S.tabs = S.tabs.filter(t => t.name !== name);
+  if (S.activeTab === name) {
+    const next = S.tabs[S.tabs.length - 1];
+    S.activeTab = null;
+    if (next) activateTab(next.name);
+    else {
+      if (editor) editor.setModel(null);
+      updateBreadcrumb();
+      updateStatusBar();
+    }
+  }
+  renderTabs();
+}
+
+function _markDirty(name, dirty) {
+  const tab = S.tabs.find(t => t.name === name);
+  if (tab && tab.dirty !== dirty) { tab.dirty = dirty; renderTabs(); }
+}
+
+function renderTabs() {
+  const container = el('tabs');
+  if (!container) return;
+  container.innerHTML = S.tabs.map(t => {
+    const state  = S.scriptStates[t.name] || 'UNLOADED';
+    const active = t.name === S.activeTab;
+    return `<div class="editor-tab${active ? ' active' : ''}" data-name="${esc(t.name)}"
+              onclick="activateTab('${escJ(t.name)}')" title="${esc(t.name)}.loom">
+      <span class="script-status s-${state}"></span>
+      <span class="tab-name-text">${esc(t.name)}.loom</span>
+      ${t.dirty ? '<span class="tab-dirty" title="Unsaved changes">●</span>' : ''}
+      <button class="tab-close-btn" onclick="closeTab('${escJ(t.name)}',event)" title="Close">&#215;</button>
+    </div>`;
+  }).join('');
+}
+
+// ── Toast ─────────────────────────────────────────────────────────
+function toast(msg, type, duration) {
+  type     = type     || 'i';
+  duration = duration || 3500;
+  const icons = { s:'✓', e:'✗', w:'⚠', i:'·' };
+  const container = el('toast-container');
+  const div = document.createElement('div');
+  div.className = 'toast toast-' + type;
+  div.innerHTML = '<span class="toast-icon">' + (icons[type] || '·') + '</span>'
+                + '<span class="toast-text">' + esc(msg) + '</span>';
+  container.appendChild(div);
+  requestAnimationFrame(function() { div.classList.add('toast-in'); });
+  setTimeout(function() {
+    div.classList.remove('toast-in');
+    setTimeout(function() { div.remove(); }, 280);
+  }, duration);
+}
+
+// ── Command palette ────────────────────────────────────────────────
+var COMMANDS = [
+  { label:'New Script',       key:'Ctrl+N',        icon:'📄', fn: function() { newScript(); } },
+  { label:'Save Script',      key:'Ctrl+S',        icon:'💾', fn: function() { saveScript(); } },
+  { label:'Load Script',      key:'Ctrl+Enter',    icon:'▶',  fn: function() { runScript(); } },
+  { label:'Unload Script',    key:'',              icon:'■',  fn: function() { stopScript(); } },
+  { label:'Reload Script',    key:'Ctrl+Shift+R',  icon:'↺',  fn: function() { reloadScript(); } },
+  { label:'Validate',         key:'',              icon:'✓',  fn: function() { validateScript(); } },
+  { label:'Rename Script',    key:'',              icon:'✏',  fn: function() { renameScript(); } },
+  { label:'Delete Script',    key:'',              icon:'🗑', fn: function() { deleteScript(); } },
+  { label:'Toggle Sidebar',   key:'Ctrl+B',        icon:'☰',  fn: function() { toggleSidebar(); } },
+  { label:'Refresh Scripts',  key:'',              icon:'↺',  fn: function() { refreshScripts(); } },
+  { label:'Show Problems',    key:'',              icon:'⚠',  fn: function() { showBottomTab('problems'); } },
+  { label:'Show Git Log',     key:'',              icon:'◎',  fn: function() { showBottomTab('git'); } },
+  { label:'Show Output',      key:'',              icon:'≡',  fn: function() { showBottomTab('output'); } },
+  { label:'Files View',       key:'',              icon:'📁', fn: function() { setActivity('files'); } },
+  { label:'Git View',         key:'',              icon:'◎',  fn: function() { setActivity('git'); } },
+];
+var filteredCmds = COMMANDS;
+var cmdIdx = 0;
+
+function openCommandPalette() {
+  el('cmd-overlay').classList.add('open');
+  el('cmd-input').value = '';
+  _filterCmds('');
+  setTimeout(function() { el('cmd-input').focus(); }, 10);
+}
+function closeCommandPalette() { el('cmd-overlay').classList.remove('open'); }
+function _filterCmds(q) {
+  var lo = q.toLowerCase();
+  filteredCmds = q ? COMMANDS.filter(function(c) { return c.label.toLowerCase().indexOf(lo) !== -1; }) : COMMANDS;
+  cmdIdx = 0;
+  _renderCmds();
+}
+function _renderCmds() {
+  el('cmd-list').innerHTML = filteredCmds.map(function(c, i) {
+    return '<div class="cmd-item' + (i === cmdIdx ? ' cmd-selected' : '') + '" onclick="runCommand(' + i + ')">'
+      + '<span class="cmd-item-icon">' + c.icon + '</span>'
+      + '<span class="cmd-label">' + esc(c.label) + '</span>'
+      + (c.key ? '<span class="cmd-key">' + esc(c.key) + '</span>' : '')
+      + '</div>';
+  }).join('');
+}
+function runCommand(i) {
+  closeCommandPalette();
+  if (filteredCmds[i]) filteredCmds[i].fn();
+}
+
+// ── Modal ──────────────────────────────────────────────────────────
+function _modal(opts) {
+  var title      = opts.title      || '';
+  var message    = opts.message    || '';
+  var hasInput   = opts.hasInput   || false;
+  var defaultVal = opts.defaultVal || '';
+  var okLabel    = opts.okLabel    || 'OK';
+  var danger     = opts.danger     || false;
+
+  return new Promise(function(resolve) {
+    var overlay = el('modal-overlay');
+    var titleEl = el('modal-title');
+    var msgEl   = el('modal-message');
+    var inputEl = el('modal-input');
+    var okBtn   = el('modal-ok');
+    var cancelBtn = el('modal-cancel');
+
+    titleEl.textContent   = title;
+    titleEl.style.display = title ? '' : 'none';
+    msgEl.textContent     = message;
+    inputEl.style.display = hasInput ? '' : 'none';
+    if (hasInput) inputEl.value = defaultVal;
+    okBtn.textContent = okLabel;
+    okBtn.className   = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
     overlay.classList.add('open');
-    if (input) setTimeout(() => { inputEl.focus(); inputEl.select(); }, 30);
+    if (hasInput) setTimeout(function() { inputEl.focus(); inputEl.select(); }, 30);
 
-    function cleanup(result) {
+    function finish(val) {
       overlay.classList.remove('open');
       okBtn.removeEventListener('click', onOk);
       cancelBtn.removeEventListener('click', onCancel);
       document.removeEventListener('keydown', onKey);
-      overlay.removeEventListener('mousedown', onBdClick);
-      resolve(result);
+      overlay.removeEventListener('mousedown', onBd);
+      resolve(val);
     }
-    function onOk()    { cleanup(input ? inputEl.value : true); }
-    function onCancel(){ cleanup(input ? null : false); }
-    function onKey(e)  { if (e.key === 'Enter') onOk(); else if (e.key === 'Escape') onCancel(); }
-    function onBdClick(e) { if (e.target === overlay) onCancel(); }
+    function onOk()     { finish(hasInput ? inputEl.value : true); }
+    function onCancel() { finish(hasInput ? null : false); }
+    function onKey(e)   { if (e.key === 'Enter') onOk(); else if (e.key === 'Escape') onCancel(); }
+    function onBd(e)    { if (e.target === overlay) onCancel(); }
 
     okBtn.addEventListener('click', onOk);
     cancelBtn.addEventListener('click', onCancel);
     document.addEventListener('keydown', onKey);
-    overlay.addEventListener('mousedown', onBdClick);
+    overlay.addEventListener('mousedown', onBd);
   });
 }
 
-function showPrompt(message, defaultValue = '') {
-  return showDialog({ message, input: true, defaultValue });
+function showPrompt(message, defaultVal, title) {
+  return _modal({ title: title || '', message: message, hasInput: true, defaultVal: defaultVal || '' });
+}
+function showConfirm(message, danger, title) {
+  return _modal({ title: title || '', message: message, okLabel: danger ? 'Delete' : 'Confirm', danger: !!danger });
 }
 
-function showConfirm(message, dangerOk = false) {
-  return showDialog({ message, okLabel: dangerOk ? 'Delete' : 'Confirm', dangerOk });
-}
-
-// Auth
+// ── Auth ───────────────────────────────────────────────────────────
 async function initAuth() {
-  const stored = sessionStorage.getItem('loom_session');
+  _setAuthStatus('Connecting…');
+  var stored = sessionStorage.getItem('loom_session');
   if (stored) {
-    const check = await fetch('/auth/status/' + stored).then(r => r.json()).catch(() => ({ authenticated: false }));
-    if (check.authenticated) {
-      API.sessionId = stored;
-      hideAuthOverlay();
-      return;
-    }
+    try {
+      var check = await fetch('/auth/status/' + stored).then(function(r) { return r.json(); });
+      if (check.authenticated) {
+        API.sessionId = stored;
+        S.player = check.player;
+        _hideAuth();
+        return;
+      }
+    } catch (_) {}
   }
 
-  const data = await fetch('/auth/init').then(r => r.json());
+  var data;
+  try {
+    data = await fetch('/auth/init').then(function(r) { return r.json(); });
+  } catch (_) { _setAuthStatus('Could not reach server.'); return; }
+
   API.sessionId = data.sessionId;
   sessionStorage.setItem('loom_session', data.sessionId);
+  var codeMatch = (data.message || '').match(/confirm (\S+)/);
+  var code = codeMatch ? codeMatch[1] : '???';
+  el('auth-cmd').textContent = '/loom confirm ' + code;
+  _setAuthStatus('Waiting for in-game confirmation…');
 
-  document.getElementById('auth-code').textContent = '';
-  document.getElementById('auth-instruction').innerHTML =
-    `Open Minecraft and run:<br><code style="color:#4ec9b0; font-size:16px; letter-spacing:2px">/loom confirm ${extractCode(data.message)}</code>`;
-  document.getElementById('auth-waiting').textContent = 'Waiting for confirmation…';
-
-  pollAuth(data.sessionId);
-}
-
-function extractCode(msg) {
-  const m = msg.match(/confirm (\S+)/);
-  return m ? m[1] : '???';
-}
-
-async function pollAuth(sessionId) {
-  const interval = setInterval(async () => {
+  var poll = setInterval(async function() {
     try {
-      const status = await fetch('/auth/status/' + sessionId).then(r => r.json());
-      if (status.authenticated) {
-        clearInterval(interval);
-        API.sessionId = sessionId;
-        hideAuthOverlay();
-        document.getElementById('auth-waiting').textContent = `Authenticated as ${status.player}`;
+      var s = await fetch('/auth/status/' + data.sessionId).then(function(r) { return r.json(); });
+      if (s.authenticated) {
+        clearInterval(poll);
+        S.player = s.player;
+        _hideAuth();
       }
     } catch (_) {}
   }, 2000);
 }
 
-function hideAuthOverlay() {
-  document.getElementById('auth-overlay').style.display = 'none';
+function _setAuthStatus(msg) { var e = el('auth-status'); if (e) e.textContent = msg; }
+
+function _hideAuth() {
+  el('auth-overlay').style.display = 'none';
+  updateStatusBar();
   initEditor();
   initWebSocket();
   refreshScripts();
 }
 
-// Monaco
+// ── Monaco ─────────────────────────────────────────────────────────
 function initEditor() {
   require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } });
-  require(['vs/editor/editor.main'], function(monaco) {
-    window.monaco = monaco;
-
+  require(['vs/editor/editor.main'], function() {
     if (window.registerLoomLanguage) window.registerLoomLanguage(monaco);
 
-    editor = monaco.editor.create(document.getElementById('editor-container'), {
+    editor = monaco.editor.create(el('editor-container'), {
       language: 'loom',
       theme: 'loom-dark',
-      value: '// Select a script from the sidebar or create a new one.',
+      value: '',
       automaticLayout: true,
       fontSize: 14,
       lineNumbers: 'on',
-      minimap: { enabled: true },
-      wordWrap: 'on',
+      minimap: { enabled: false },
+      wordWrap: 'off',
       tabSize: 2,
       insertSpaces: true,
       scrollBeyondLastLine: false,
       renderWhitespace: 'selection',
       bracketPairColorization: { enabled: true },
-      suggest: { showKeywords: true },
       cursorStyle: 'line',
       cursorBlinking: 'smooth',
       cursorSmoothCaretAnimation: 'on',
+      padding: { top: 8, bottom: 8 },
+      smoothScrolling: true,
+      suggest: { showKeywords: true },
     });
 
-    unreachableCollection = editor.createDecorationsCollection([]);
+    unreachDecs = editor.createDecorationsCollection([]);
 
-    // Register completion provider
+    editor.onDidChangeCursorPosition(function(ev) {
+      var pos = ev.position;
+      var posEl = el('sb-pos');
+      if (posEl) posEl.textContent = 'Ln ' + pos.lineNumber + ', Col ' + pos.column;
+    });
+
+    // Completion provider
     monaco.languages.registerCompletionItemProvider('loom', {
       triggerCharacters: ['.', ' '],
-      provideCompletionItems(model, position) {
-        const source = model.getValue();
+      provideCompletionItems: function(model, pos) {
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'complete',
-            payload: { source, line: position.lineNumber, col: position.column }
-          }));
+          ws.send(JSON.stringify({ type:'complete',
+            payload:{ source: model.getValue(), line: pos.lineNumber, col: pos.column } }));
         }
-        // Return built-in static completions immediately
-        const word = model.getWordUntilPosition(position);
-        const range = { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
+        var word  = model.getWordUntilPosition(pos);
+        var range = { startLineNumber: pos.lineNumber, endLineNumber: pos.lineNumber,
           startColumn: word.startColumn, endColumn: word.endColumn };
-        const items = [
-          ...window.LOOM_KEYWORDS.map(k => ({ label: k, kind: monaco.languages.CompletionItemKind.Keyword,
-            insertText: k, range })),
-          ...window.LOOM_BUILTINS.map(b => ({ label: b, kind: monaco.languages.CompletionItemKind.Function,
-            insertText: b + '($0)', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range })),
-          ...window.LOOM_EVENTS.map(e => ({ label: e, kind: monaco.languages.CompletionItemKind.Event,
-            insertText: e, range, detail: 'Loom event' })),
-        ];
-        return { suggestions: items };
+        var kw = (window.LOOM_KEYWORDS || []).map(function(k) {
+          return { label:k, kind: monaco.languages.CompletionItemKind.Keyword, insertText:k, range:range }; });
+        var bi = (window.LOOM_BUILTINS || []).map(function(b) {
+          return { label:b, kind: monaco.languages.CompletionItemKind.Function,
+            insertText: b + '($0)',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            range:range, detail:'built-in' }; });
+        var evs = (window.LOOM_EVENTS || []).map(function(e) {
+          return { label:e, kind: monaco.languages.CompletionItemKind.Event, insertText:e, range:range, detail:'event' }; });
+        return { suggestions: kw.concat(bi).concat(evs) };
       }
     });
 
-    // Register hover provider
+    // Hover provider
     monaco.languages.registerHoverProvider('loom', {
-      provideHover(model, position) {
-        const word = model.getWordAtPosition(position);
+      provideHover: function(model, pos) {
+        var word = model.getWordAtPosition(pos);
         if (!word) return null;
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'hover', payload: { word: word.word } }));
+          ws.send(JSON.stringify({ type:'hover', payload:{ word: word.word } }));
         }
-        return null;
+        var docs = window.LOOM_BUILTIN_DOCS || {};
+        var doc  = docs[word.word];
+        if (!doc) return null;
+        return {
+          range: new monaco.Range(pos.lineNumber, word.startColumn, pos.lineNumber, word.endColumn),
+          contents: [{ value: '```\n' + doc + '\n```' }]
+        };
       }
     });
 
-    // Register quick-fix provider
+    // Quick-fix code action provider
     monaco.languages.registerCodeActionProvider('loom', {
-      provideCodeActions(model, range, context) {
-        // Use getModelMarkers so fixes appear even when 1-char markers don't overlap the cursor column exactly.
-        const markers = monaco.editor.getModelMarkers({ resource: model.uri, owner: 'loom' })
-          .filter(m => m.startLineNumber <= range.endLineNumber && m.endLineNumber >= range.startLineNumber);
-
-        const actions = [];
-
-        function singleLineEdit(title, marker, ln, startCol, endCol, text, preferred = true) {
-          actions.push({
-            title,
-            kind: 'quickfix',
-            diagnostics: [marker],
-            isPreferred: preferred,
-            edit: {
-              edits: [{
-                resource: model.uri,
-                versionId: model.getVersionId(),
-                textEdit: { range: new monaco.Range(ln, startCol, ln, endCol), text }
-              }]
-            }
+      provideCodeActions: function(model, range, ctx) {
+        var markers = monaco.editor.getModelMarkers({ resource: model.uri, owner: 'loom' })
+          .filter(function(m) {
+            return m.startLineNumber <= range.endLineNumber && m.endLineNumber >= range.startLineNumber;
           });
+        var actions = [];
+
+        function lineEdit(title, marker, ln, sc, ec, text) {
+          actions.push({ title:title, kind:'quickfix', diagnostics:[marker], isPreferred:true,
+            edit:{ edits:[{ resource:model.uri, versionId:model.getVersionId(),
+              textEdit:{ range: new monaco.Range(ln,sc,ln,ec), text:text } }] } });
+        }
+        function delLine(title, marker, ln) {
+          actions.push({ title:title, kind:'quickfix', diagnostics:[marker], isPreferred:true,
+            edit:{ edits:[{ resource:model.uri, versionId:model.getVersionId(),
+              textEdit:{ range: new monaco.Range(ln,1,ln+1,1), text:'' } }] } });
         }
 
-        function deleteLines(title, marker, startLn, endLn) {
-          actions.push({
-            title,
-            kind: 'quickfix',
-            diagnostics: [marker],
-            isPreferred: true,
-            edit: {
-              edits: [{
-                resource: model.uri,
-                versionId: model.getVersionId(),
-                textEdit: { range: new monaco.Range(startLn, 1, endLn + 1, 1), text: '' }
-              }]
-            }
-          });
-        }
+        for (var mi = 0; mi < markers.length; mi++) {
+          var marker = markers[mi];
+          var msg    = marker.message;
+          var ln     = marker.startLineNumber;
+          var line   = model.getLineContent(ln);
 
-        for (const marker of markers) {
-          const msg = marker.message;
-          const ln  = marker.startLineNumber;
-          const line = model.getLineContent(ln);
-
-          // Event name typo: "Unknown event 'X' — did you mean 'Y'?"
-          const typoMatch = msg.match(/Unknown event '(\w+)'.*did you mean '(\w+)'/);
-          if (typoMatch) {
-            const [, wrong, right] = typoMatch;
-            const idx = line.indexOf(wrong);
-            if (idx !== -1)
-              singleLineEdit(`Rename to '${right}'`, marker, ln, idx + 1, idx + 1 + wrong.length, right);
+          var typo = msg.match(/Unknown event '(\w+)'.*did you mean '(\w+)'/);
+          if (typo) {
+            var wrong = typo[1], right = typo[2];
+            var tidx = line.indexOf(wrong);
+            if (tidx !== -1) lineEdit("Rename to '" + right + "'", marker, ln, tidx+1, tidx+1+wrong.length, right);
             continue;
           }
-
-          // Double negation: "Double negation 'not not x'"
-          if (msg.includes('Double negation')) {
-            const m = line.match(/^(\s*)(not\s+not\s+|!!)(.*)/);
-            if (m)
-              singleLineEdit('Remove double negation', marker, ln, 1, line.length + 1, m[1] + m[3]);
+          if (msg.indexOf('Double negation') !== -1) {
+            var dm = line.match(/^(\s*)(not\s+not\s+|!!)(.*)/);
+            if (dm) lineEdit('Remove double negation', marker, ln, 1, line.length+1, dm[1]+dm[3]);
           }
-
-          // not (a == b) → a != b
-          if (msg.includes("can be written as 'a != b'")) {
-            const m = line.match(/not\s*\(([^)]+)==([^)]+)\)/);
-            if (m) {
-              const idx = line.indexOf(m[0]);
-              const l = m[1].trim(), r = m[2].trim();
-              singleLineEdit(`Simplify to '${l} != ${r}'`, marker, ln, idx + 1, idx + 1 + m[0].length, `${l} != ${r}`);
-            }
+          if (msg.indexOf("can be written as 'a != b'") !== -1) {
+            var m1 = line.match(/not\s*\(([^)]+)==([^)]+)\)/);
+            if (m1) { var i1=line.indexOf(m1[0]); var l1=m1[1].trim(),r1=m1[2].trim();
+              lineEdit('Simplify to '+l1+' != '+r1, marker, ln, i1+1, i1+1+m1[0].length, l1+' != '+r1); }
           }
-
-          // not (a != b) → a == b
-          if (msg.includes("can be written as 'a == b'")) {
-            const m = line.match(/not\s*\(([^)]+)!=([^)]+)\)/);
-            if (m) {
-              const idx = line.indexOf(m[0]);
-              const l = m[1].trim(), r = m[2].trim();
-              singleLineEdit(`Simplify to '${l} == ${r}'`, marker, ln, idx + 1, idx + 1 + m[0].length, `${l} == ${r}`);
-            }
+          if (msg.indexOf("can be written as 'a == b'") !== -1) {
+            var m2 = line.match(/not\s*\(([^)]+)!=([^)]+)\)/);
+            if (m2) { var i2=line.indexOf(m2[0]); var l2=m2[1].trim(),r2=m2[2].trim();
+              lineEdit('Simplify to '+l2+' == '+r2, marker, ln, i2+1, i2+1+m2[0].length, l2+' == '+r2); }
           }
-
-          // No-op compound assignments: x += 0, x -= 0, x *= 1
-          if (msg.includes('has no effect') &&
-              (msg.includes('+= 0') || msg.includes('-= 0') || msg.includes('*= 1'))) {
-            deleteLines('Remove no-op statement', marker, ln, ln);
-          }
-
-          // Self-assignment: x = x has no effect
-          if (msg.includes('Self-assignment') && msg.includes('has no effect')) {
-            deleteLines('Remove self-assignment', marker, ln, ln);
-          }
+          if (msg.indexOf('has no effect') !== -1 &&
+              (msg.indexOf('+= 0') !== -1 || msg.indexOf('-= 0') !== -1 || msg.indexOf('*= 1') !== -1))
+            delLine('Remove no-op statement', marker, ln);
+          if (msg.indexOf('Self-assignment') !== -1 && msg.indexOf('has no effect') !== -1)
+            delLine('Remove self-assignment', marker, ln);
         }
-
-        return { actions, dispose: () => {} };
+        return { actions:actions, dispose:function(){} };
       }
-    });
-
-    // Validate on change (debounced)
-    editor.onDidChangeModelContent(() => {
-      clearTimeout(validateTimeout);
-      validateTimeout = setTimeout(validateCurrent, 600);
     });
   });
 }
 
-// WebSocket
+// ── WebSocket ──────────────────────────────────────────────────────
 function initWebSocket() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws/${API.sessionId}`);
-
-  ws.onopen = () => appendOutput('Connected to Loom language server.');
-  ws.onclose = () => setTimeout(initWebSocket, 3000);
-
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.type === 'diagnostics') showDiagnostics(msg.diagnostics);
-    if (msg.type === 'hover' && msg.doc) {
-      // Monaco hover handled via provider; log here for debug
-    }
+  var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(proto + '://' + location.host + '/ws/' + API.sessionId);
+  ws.onopen  = function() { _sbConn(true);  appendOutput('Connected to language server.', 'ok'); };
+  ws.onclose = function() { _sbConn(false); setTimeout(initWebSocket, 3500); };
+  ws.onmessage = function(ev) {
+    try {
+      var msg = JSON.parse(ev.data);
+      if (msg.type === 'diagnostics') showDiagnostics(msg.diagnostics || []);
+    } catch (_) {}
   };
 }
 
-// Script list
+function _sbConn(connected) {
+  var e = el('sb-conn');
+  if (!e) return;
+  e.innerHTML = '<span class="sb-conn-dot" style="color:'
+    + (connected ? 'var(--success)' : 'var(--error)') + '">●</span>'
+    + (connected ? ' Connected' : ' Reconnecting…');
+}
+
+// ── Scripts ────────────────────────────────────────────────────────
 async function refreshScripts() {
   try {
-    const list = await API.get('/scripts');
-    const el = document.getElementById('script-list');
-    el.innerHTML = '';
-    list.forEach(s => {
-      const item = document.createElement('div');
-      item.className = 'script-item' + (s.name === currentScript ? ' active' : '');
-      item.innerHTML = `<span class="script-status status-${s.state}"></span>${s.name}`;
-      item.onclick = () => openScript(s.name);
-      el.appendChild(item);
-    });
-  } catch (err) { appendOutput('Error loading scripts: ' + err.message); }
+    var list = await API.get('/scripts');
+    S.scripts = list;
+    list.forEach(function(s) { S.scriptStates[s.name] = s.state; });
+    renderScriptList();
+    renderTabs();
+    updateStatusBar();
+  } catch (err) { appendOutput('Error loading scripts: ' + err.message, 'err'); }
 }
 
-async function openScript(name) {
-  try {
-    const data = await API.get('/scripts/' + name);
-    currentScript = name;
-    document.getElementById('filename-display').textContent = name + '.loom';
-    if (editor) editor.setValue(data.source);
-    await refreshScripts();
-    await loadGitLog(name);
-    validateCurrent();
-  } catch (err) { appendOutput('Error opening script: ' + err.message); }
+function renderScriptList() {
+  var container = el('script-list');
+  if (!container) return;
+  var q = S.filter.toLowerCase();
+  var items = q ? S.scripts.filter(function(s) { return s.name.toLowerCase().indexOf(q) !== -1; }) : S.scripts;
+  if (!items.length) {
+    container.innerHTML = '<span class="empty-msg">' + (q ? 'No matches.' : 'No scripts. Create one!') + '</span>';
+    return;
+  }
+  container.innerHTML = items.map(function(s) {
+    return '<div class="script-item' + (s.name === S.activeTab ? ' active' : '')
+      + '" data-name="' + esc(s.name) + '" onclick="openTab(\'' + escJ(s.name) + '\')" title="' + esc(s.name) + '.loom — ' + s.state + '">'
+      + '<span class="script-status s-' + s.state + '"></span>'
+      + '<span class="script-name">' + esc(s.name) + '.loom</span>'
+      + '<span class="script-row-btns">'
+      + '<button onclick="quickLoad(\'' + escJ(s.name) + '\',event)" title="Load">▶</button>'
+      + '<button onclick="quickStop(\'' + escJ(s.name) + '\',event)" title="Unload">■</button>'
+      + '</span>'
+      + '</div>';
+  }).join('');
 }
 
-// Toolbar actions
-async function saveScript() {
-  if (!currentScript || !editor) return;
-  const source = editor.getValue();
-  const msg = await showPrompt('Commit message (leave blank for auto):') ?? '';
-  try {
-    await API.post('/scripts/' + currentScript, {
-      source,
-      commitMessage: msg || `Save ${currentScript}.loom`
-    });
-    appendOutput(`Saved ${currentScript}.loom`);
-    await loadGitLog(currentScript);
-    await refreshScripts();
-  } catch (err) { appendOutput('Save error: ' + err.message); }
-}
-
-async function runScript() {
-  if (!currentScript) return;
-  try {
-    const res = await API.post('/scripts/' + currentScript + '/load', {});
-    appendOutput(`Load result: ${res.state}`);
-    if (res.diagnostics?.length) showDiagnostics(res.diagnostics);
-    await refreshScripts();
-  } catch (err) { appendOutput('Load error: ' + err.message); }
-}
-
-async function stopScript() {
-  if (!currentScript) return;
-  try {
-    await API.post('/scripts/' + currentScript + '/unload', {});
-    appendOutput(`Unloaded ${currentScript}`);
-    await refreshScripts();
-  } catch (err) { appendOutput('Unload error: ' + err.message); }
-}
-
-async function validateScript() {
-  if (!currentScript || !editor) return;
-  await validateCurrent();
-}
-
-async function deleteScript() {
-  if (!currentScript) return;
-  if (!await showConfirm(`Delete ${currentScript}.loom? This cannot be undone.`, true)) return;
-  try {
-    await API.delete('/scripts/' + currentScript);
-    currentScript = null;
-    document.getElementById('filename-display').textContent = 'No script open';
-    if (editor) editor.setValue('');
-    await refreshScripts();
-  } catch (err) { appendOutput('Delete error: ' + err.message); }
-}
-
-async function newScript() {
-  const name = await showPrompt('Script name (alphanumeric, underscores, hyphens):');
-  if (!name) return;
-  try {
-    await API.put('/scripts/' + name, { source: defaultSource(name) });
-    await refreshScripts();
-    await openScript(name);
-  } catch (err) { appendOutput('Create error: ' + err.message); }
+function filterScripts(q) {
+  S.filter = q || '';
+  renderScriptList();
 }
 
 function defaultSource(name) {
-  return `script "${name}" {\n  on PlayerJoin(player) {\n    player.message("Hello, \${player.name}!")\n  }\n}`;
+  return 'script "' + name + '" {\n  on PlayerJoin(player) {\n    player.message("Hello!")\n  }\n}';
 }
 
-// Validation
-async function validateCurrent() {
-  if (!currentScript || !editor || !window.monaco) return;
-  const source = editor.getValue();
+async function newScript() {
+  var name = await showPrompt('Script name (letters, digits, hyphens, underscores):', '', 'New Script');
+  if (!name || !name.trim()) return;
+  var clean = name.trim();
   try {
-    const res = await API.post('/scripts/' + currentScript + '/validate', { source });
+    await API.put('/scripts/' + clean, { source: defaultSource(clean) });
+    toast('Created ' + clean + '.loom', 's');
+    await refreshScripts();
+    await openTab(clean);
+  } catch (err) { toast('Create failed: ' + err.message, 'e'); }
+}
+
+async function saveScript() {
+  if (!S.activeTab || !editor) { toast('No script open.', 'w'); return; }
+  var name  = S.activeTab;
+  var model = editorModels[name];
+  if (!model) return;
+  var source = model.getValue();
+  var msg = await showPrompt('Commit message (leave blank for auto):', '', 'Save ' + name + '.loom');
+  if (msg === null) return;
+  try {
+    await API.post('/scripts/' + name, { source: source, commitMessage: msg || 'Update ' + name + '.loom' });
+    _markDirty(name, false);
+    toast('Saved ' + name + '.loom', 's');
+    appendOutput('Saved ' + name + '.loom');
+    await loadGitLog(name);
+    await refreshScripts();
+  } catch (err) { toast('Save failed: ' + err.message, 'e'); }
+}
+
+async function runScript() {
+  if (!S.activeTab) { toast('No script open.', 'w'); return; }
+  var name = S.activeTab;
+  try {
+    var res = await API.post('/scripts/' + name + '/load', {});
+    S.scriptStates[name] = res.state;
+    if (res.diagnostics && res.diagnostics.length) showDiagnostics(res.diagnostics);
+    var ok = res.state === 'RUNNING';
+    toast('Loaded ' + name + ' → ' + res.state, ok ? 's' : 'e');
+    appendOutput('Load: ' + name + ' → ' + res.state, ok ? 'ok' : 'err');
+    renderTabs(); renderScriptList(); updateStatusBar();
+  } catch (err) { toast('Load failed: ' + err.message, 'e'); }
+}
+
+async function stopScript() {
+  if (!S.activeTab) { toast('No script open.', 'w'); return; }
+  var name = S.activeTab;
+  try {
+    await API.post('/scripts/' + name + '/unload', {});
+    S.scriptStates[name] = 'UNLOADED';
+    toast('Unloaded ' + name, 'i');
+    appendOutput('Unloaded ' + name);
+    renderTabs(); renderScriptList(); updateStatusBar();
+  } catch (err) { toast('Unload failed: ' + err.message, 'e'); }
+}
+
+async function reloadScript() {
+  if (!S.activeTab) { toast('No script open.', 'w'); return; }
+  var name = S.activeTab;
+  try {
+    var res = await API.post('/scripts/' + name + '/reload', {});
+    S.scriptStates[name] = res.state;
+    if (res.diagnostics && res.diagnostics.length) showDiagnostics(res.diagnostics);
+    var ok = res.state === 'RUNNING';
+    toast('Reloaded ' + name + ' → ' + res.state, ok ? 's' : 'e');
+    appendOutput('Reload: ' + name + ' → ' + res.state, ok ? 'ok' : 'err');
+    renderTabs(); renderScriptList(); updateStatusBar();
+  } catch (err) { toast('Reload failed: ' + err.message, 'e'); }
+}
+
+async function validateScript() {
+  await validateCurrent();
+  var c = S.diagCounts;
+  toast('Validate: ' + c.errors + ' error(s), ' + c.warnings + ' warning(s)',
+    c.errors ? 'e' : c.warnings ? 'w' : 's');
+  showBottomTab('problems');
+}
+
+async function deleteScript() {
+  if (!S.activeTab) { toast('No script open.', 'w'); return; }
+  var name = S.activeTab;
+  if (!await showConfirm('Delete ' + name + '.loom permanently? This cannot be undone.', true, 'Delete Script')) return;
+  try {
+    await API.del('/scripts/' + name);
+    closeTab(name);
+    delete S.scriptStates[name];
+    toast('Deleted ' + name + '.loom', 'i');
+    await refreshScripts();
+  } catch (err) { toast('Delete failed: ' + err.message, 'e'); }
+}
+
+async function renameScript() {
+  if (!S.activeTab) { toast('No script open.', 'w'); return; }
+  var oldName = S.activeTab;
+  var newName = await showPrompt('New name for ' + oldName + ':', oldName, 'Rename Script');
+  if (!newName || newName === oldName) return;
+  try {
+    await API.post('/scripts/' + oldName + '/rename', { newName: newName });
+    var model = editorModels[oldName];
+    if (model) { model.dispose(); delete editorModels[oldName]; }
+    S.tabs = S.tabs.filter(function(t) { return t.name !== oldName; });
+    delete S.scriptStates[oldName];
+    if (S.activeTab === oldName) S.activeTab = null;
+    toast('Renamed to ' + newName + '.loom', 's');
+    await refreshScripts();
+    await openTab(newName);
+  } catch (err) { toast('Rename failed: ' + err.message, 'e'); }
+}
+
+async function quickLoad(name, ev) {
+  ev && ev.stopPropagation();
+  try {
+    var res = await API.post('/scripts/' + name + '/load', {});
+    S.scriptStates[name] = res.state;
+    toast(name + ' → ' + res.state, res.state === 'RUNNING' ? 's' : 'e');
+    renderScriptList(); renderTabs(); updateStatusBar();
+  } catch (err) { toast(err.message, 'e'); }
+}
+
+async function quickStop(name, ev) {
+  ev && ev.stopPropagation();
+  try {
+    await API.post('/scripts/' + name + '/unload', {});
+    S.scriptStates[name] = 'UNLOADED';
+    toast(name + ' unloaded', 'i');
+    renderScriptList(); renderTabs(); updateStatusBar();
+  } catch (err) { toast(err.message, 'e'); }
+}
+
+// ── Diagnostics ────────────────────────────────────────────────────
+async function validateCurrent() {
+  if (!S.activeTab || !editor || !window.monaco) return;
+  var name  = S.activeTab;
+  var model = editorModels[name];
+  if (!model || model.isDisposed()) return;
+  try {
+    var res = await API.post('/scripts/' + name + '/validate', { source: model.getValue() });
     showDiagnostics(res.diagnostics || []);
   } catch (_) {}
 }
 
 function showDiagnostics(diags) {
   if (!window.monaco || !editor) return;
-  const model = editor.getModel();
+  var model = editor.getModel();
   if (!model) return;
 
-  const unreachable = diags.filter(d => d.severity === 'UNREACHABLE');
-  const regular     = diags.filter(d => d.severity !== 'UNREACHABLE');
+  var unreachable = diags.filter(function(d) { return d.severity === 'UNREACHABLE'; });
+  var regular     = diags.filter(function(d) { return d.severity !== 'UNREACHABLE'; });
 
-  // Apply grey-out decorations for unreachable ranges
-  if (unreachableCollection) {
-    unreachableCollection.set(unreachable.map(d => ({
-      range: new monaco.Range(d.line, 1, d.endLine || d.line, 1000),
-      options: { inlineClassName: 'loom-unreachable', isWholeLine: true }
-    })));
+  if (unreachDecs) {
+    unreachDecs.set(unreachable.map(function(d) {
+      return {
+        range: new monaco.Range(d.line, 1, d.endLine || d.line, 9999),
+        options: { inlineClassName: 'loom-unreachable', isWholeLine: true }
+      };
+    }));
   }
 
-  const markers = regular.map(d => ({
-    severity: d.severity === 'ERROR' ? monaco.MarkerSeverity.Error
-      : d.severity === 'WARNING' ? monaco.MarkerSeverity.Warning
-      : monaco.MarkerSeverity.Info,
-    message: d.message,
-    startLineNumber: d.line,
-    startColumn: d.col,
-    endLineNumber: d.endLine || d.line,
-    endColumn: d.endCol || d.col + 1,
-  }));
-
+  var markers = regular.map(function(d) {
+    return {
+      severity: d.severity === 'ERROR'   ? monaco.MarkerSeverity.Error
+              : d.severity === 'WARNING' ? monaco.MarkerSeverity.Warning
+              : monaco.MarkerSeverity.Info,
+      message: d.message,
+      startLineNumber: d.line,    startColumn: d.col,
+      endLineNumber: d.endLine || d.line, endColumn: (d.endCol || d.col + 1),
+      owner: 'loom',
+    };
+  });
   monaco.editor.setModelMarkers(model, 'loom', markers);
 
-  const diagEl = document.getElementById('tab-diagnostics');
-  const allDisplayed = [...regular, ...unreachable];
-  if (allDisplayed.length === 0) {
-    diagEl.innerHTML = '<span style="color:var(--text-3)">No problems detected.</span>';
-  } else {
-    diagEl.innerHTML = allDisplayed.map(d =>
-      `<div class="diag-${d.severity.toLowerCase()}">` +
-      `[${d.line}:${d.col}] ${escHtml(d.message)}</div>`
-    ).join('');
-    // Only auto-switch to diagnostics tab if there are real errors/warnings, not just unreachable hints
-    if (regular.length > 0) showTab('diagnostics');
+  var errors   = regular.filter(function(d) { return d.severity === 'ERROR'; }).length;
+  var warnings = regular.filter(function(d) { return d.severity === 'WARNING'; }).length;
+  S.diagCounts = { errors: errors, warnings: warnings };
+
+  // Badge on Problems tab
+  var badge = el('prob-badge');
+  if (badge) {
+    if (errors > 0) {
+      badge.textContent = errors; badge.className = 'count-badge'; badge.style.display = '';
+    } else if (warnings > 0) {
+      badge.textContent = warnings; badge.className = 'count-badge badge-warn'; badge.style.display = '';
+    } else { badge.style.display = 'none'; }
   }
+
+  // Status bar diag count
+  var sd = el('sb-diags');
+  if (sd) {
+    if (errors > 0 || warnings > 0) {
+      sd.textContent = (errors > 0 ? '✗ ' + errors : '')
+        + (warnings > 0 ? (errors > 0 ? '  ⚠ ' : '⚠ ') + warnings : '');
+      sd.style.display = '';
+    } else { sd.style.display = 'none'; }
+  }
+
+  // Problems panel
+  var probEl = el('tab-problems');
+  var all = regular.concat(unreachable);
+  if (!all.length) {
+    probEl.innerHTML = '<span class="empty-msg">No problems detected.</span>';
+    return;
+  }
+  var sevIcon = { ERROR:'✗', WARNING:'⚠', INFO:'·', UNREACHABLE:'~' };
+  var sevCls  = { ERROR:'E', WARNING:'W', INFO:'I', UNREACHABLE:'U' };
+  probEl.innerHTML = all.map(function(d) {
+    return '<div class="diag-item" onclick="jumpTo(' + d.line + ',' + d.col + ')">'
+      + '<span class="dsev dsev-' + (sevCls[d.severity] || 'I') + '">' + (sevIcon[d.severity] || '·') + '</span>'
+      + '<span class="dloc">' + d.line + ':' + d.col + '</span>'
+      + '<span class="dmsg">' + esc(d.message) + '</span>'
+      + '</div>';
+  }).join('');
+
+  if (regular.some(function(d) { return d.severity !== 'INFO'; })) showBottomTab('problems');
+  updateStatusBar();
 }
 
-// Git log panel
+function jumpTo(line, col) {
+  if (!editor) return;
+  editor.revealLineInCenter(line);
+  editor.setPosition({ lineNumber: line, column: col });
+  editor.focus();
+}
+
+// ── Git ────────────────────────────────────────────────────────────
 async function loadGitLog(name) {
   try {
-    const commits = await API.get('/git/' + name + '/log');
-    const el = document.getElementById('tab-git');
-    if (commits.length === 0) {
-      el.innerHTML = '<span style="color:#888">No commits yet.</span>';
+    var commits = await API.get('/git/' + name + '/log');
+    var gitEl  = el('tab-git');
+    var sideEl = el('git-sidebar');
+    if (!commits.length) {
+      var empty = '<span class="empty-msg">No commits yet.</span>';
+      if (gitEl)  gitEl.innerHTML  = empty;
+      if (sideEl) sideEl.innerHTML = empty;
       return;
     }
-    el.innerHTML = commits.map(c => `
-      <div class="commit-item">
-        <span class="commit-hash" style="cursor:pointer" onclick="showCommit('${c.hash}','${name}')" title="Restore this version">${c.shortHash}</span>
-        <span class="commit-msg"> ${escHtml(c.message)}</span>
-        <span class="commit-meta"> — ${c.author} at ${new Date(c.timestamp).toLocaleString()}</span>
-      </div>`
-    ).join('');
+    var html = commits.map(function(c) {
+      return '<div class="commit-item">'
+        + '<span class="commit-hash" onclick="showCommit(\'' + escJ(c.hash) + '\',\'' + escJ(name) + '\')" title="' + esc(c.hash) + '">' + esc(c.shortHash) + '</span>'
+        + '<span class="commit-msg">' + esc(c.message) + '</span>'
+        + '<span class="commit-meta">— ' + esc(c.author) + ' · ' + new Date(c.timestamp).toLocaleString() + '</span>'
+        + '</div>';
+    }).join('');
+    if (gitEl)  gitEl.innerHTML  = html;
+    if (sideEl) sideEl.innerHTML = html;
   } catch (_) {}
 }
 
 async function showCommit(hash, name) {
   try {
-    const data = await API.get(`/git/${name}/show/${hash}`);
-    if (await showConfirm(`Restore to commit ${hash.slice(0,7)}? Current unsaved changes will be overwritten in the editor.`)) {
-      if (editor) editor.setValue(data.source);
-      appendOutput(`Loaded version ${hash.slice(0,7)} into editor. Save to persist.`);
+    var data = await API.get('/git/' + name + '/show/' + hash);
+    if (await showConfirm(
+      'Restore ' + name + '.loom to version ' + hash.slice(0,7) + '? Unsaved editor changes will be replaced.',
+      false, 'Restore Version'
+    )) {
+      var model = editorModels[name];
+      if (model) model.setValue(data.source);
+      else if (editor) editor.setValue(data.source);
+      _markDirty(name, true);
+      toast('Restored version ' + hash.slice(0,7), 'i');
     }
-  } catch (err) { appendOutput('Error loading commit: ' + err.message); }
+  } catch (err) { toast('Cannot load commit: ' + err.message, 'e'); }
 }
 
-function showGit() {
-  showTab('git');
-  if (currentScript) loadGitLog(currentScript);
+// ── UI ─────────────────────────────────────────────────────────────
+function setActivity(name) {
+  S.activity = name;
+  document.querySelectorAll('.act-btn[data-act]').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.act === name);
+  });
+  document.querySelectorAll('.side-panel').forEach(function(p) { p.style.display = 'none'; });
+  var panel = el('panel-' + name);
+  if (panel) panel.style.display = '';
 }
 
-// UI helpers
-function showTab(name) {
-  ['diagnostics', 'git', 'output'].forEach(t => {
-    document.getElementById('tab-' + t).style.display = t === name ? '' : 'none';
-    document.querySelectorAll('.tab-btn').forEach((btn, i) => {
-      btn.classList.toggle('active', btn.textContent.toLowerCase().includes(t === name ? name.slice(0,3) : '___'));
+function toggleSidebar() {
+  S.sidebarOpen = !S.sidebarOpen;
+  el('sidebar').classList.toggle('collapsed', !S.sidebarOpen);
+  if (editor) editor.layout();
+}
+
+function showBottomTab(name) {
+  S.bottomTab = name;
+  document.querySelectorAll('.btab').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.tab === name);
+  });
+  document.querySelectorAll('#bottom-content > div').forEach(function(d) { d.style.display = 'none'; });
+  var target = el('tab-' + name);
+  if (target) target.style.display = '';
+}
+
+function updateBreadcrumb() {
+  var bc = el('breadcrumb');
+  if (!bc) return;
+  bc.innerHTML = S.activeTab
+    ? 'scripts / <span class="bc-file">' + esc(S.activeTab) + '.loom</span>'
+    : '<span style="color:var(--text-3)">No script open</span>';
+}
+
+function updateStatusBar() {
+  var playerEl = el('sb-player');
+  var scriptEl = el('sb-script');
+  var stateEl  = el('sb-state');
+  var bar      = el('status-bar');
+
+  if (playerEl) {
+    if (S.player) { playerEl.textContent = '👤 ' + S.player; playerEl.style.display = ''; }
+    else playerEl.style.display = 'none';
+  }
+  if (scriptEl) scriptEl.textContent = S.activeTab ? S.activeTab + '.loom' : 'Loom Editor';
+
+  var state = S.activeTab ? (S.scriptStates[S.activeTab] || 'UNLOADED') : '';
+  if (stateEl) stateEl.textContent = state ? '[' + state + ']' : '';
+  if (bar) {
+    bar.className = state === 'ERROR'   ? 'sb-error'
+      : (state === 'IDLE' || state === 'UNLOADED') ? 'sb-idle'
+      : '';
+  }
+
+  // Update player initial in activity bar
+  var actPlayer = el('act-player');
+  if (actPlayer) {
+    actPlayer.title = S.player ? S.player : 'Not connected';
+    actPlayer.textContent = S.player ? S.player[0].toUpperCase() : '?';
+  }
+}
+
+// ── Resize handle ──────────────────────────────────────────────────
+function initResize() {
+  var handle = el('panel-resize');
+  var panel  = el('bottom-panel');
+  if (!handle || !panel) return;
+  var dragging = false, startY = 0, startH = 0;
+  handle.addEventListener('mousedown', function(ev) {
+    dragging = true; startY = ev.clientY; startH = panel.offsetHeight;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'row-resize';
+  });
+  document.addEventListener('mousemove', function(ev) {
+    if (!dragging) return;
+    var h = Math.max(60, Math.min(600, startH - (ev.clientY - startY)));
+    panel.style.height = h + 'px';
+  });
+  document.addEventListener('mouseup', function() {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
+    if (editor) editor.layout();
+  });
+}
+
+// ── Keyboard shortcuts ─────────────────────────────────────────────
+function initKeyboard() {
+  document.addEventListener('keydown', function(ev) {
+    var ctrl = ev.ctrlKey || ev.metaKey;
+    if (ctrl && ev.key === 's')     { ev.preventDefault(); saveScript(); }
+    if (ctrl && ev.key === 'k')     { ev.preventDefault(); openCommandPalette(); }
+    if (ctrl && ev.key === 'b')     { ev.preventDefault(); toggleSidebar(); }
+    if (ctrl && ev.key === 'n')     { ev.preventDefault(); newScript(); }
+    if (ctrl && ev.key === 'Enter') { ev.preventDefault(); runScript(); }
+    if (ctrl && ev.shiftKey && ev.key === 'R') { ev.preventDefault(); reloadScript(); }
+    if (ev.key === 'Escape') {
+      var overlay = el('cmd-overlay');
+      if (overlay && overlay.classList.contains('open')) { ev.preventDefault(); closeCommandPalette(); }
+    }
+  });
+
+  var cmdInput = el('cmd-input');
+  if (cmdInput) {
+    cmdInput.addEventListener('input', function(ev) { _filterCmds(ev.target.value); });
+    cmdInput.addEventListener('keydown', function(ev) {
+      if      (ev.key === 'ArrowDown') { cmdIdx = Math.min(cmdIdx+1, filteredCmds.length-1); _renderCmds(); ev.preventDefault(); }
+      else if (ev.key === 'ArrowUp')   { cmdIdx = Math.max(cmdIdx-1, 0); _renderCmds(); ev.preventDefault(); }
+      else if (ev.key === 'Enter')     { runCommand(cmdIdx); ev.preventDefault(); }
+      else if (ev.key === 'Escape')    { closeCommandPalette(); ev.preventDefault(); }
     });
-  });
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    const tabName = btn.getAttribute('onclick')?.match(/'(\w+)'/)?.[1];
-    btn.classList.toggle('active', tabName === name);
-  });
+  }
+
+  var cmdOverlay = el('cmd-overlay');
+  if (cmdOverlay) {
+    cmdOverlay.addEventListener('mousedown', function(ev) {
+      if (ev.target === cmdOverlay) closeCommandPalette();
+    });
+  }
 }
 
-function appendOutput(msg) {
-  const el = document.getElementById('tab-output');
-  const line = document.createElement('div');
-  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-  el.appendChild(line);
-  el.scrollTop = el.scrollHeight;
+// ── Output log ─────────────────────────────────────────────────────
+function appendOutput(msg, type) {
+  var container = el('tab-output');
+  if (!container) return;
+  var div = document.createElement('div');
+  div.className = 'out-line' + (type ? ' out-' + type : '');
+  div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
 }
 
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-// Boot
-window.addEventListener('DOMContentLoaded', () => {
+// ── Boot ───────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', function() {
+  initKeyboard();
+  initResize();
+  showBottomTab('problems');
   initAuth();
-  // default tab
-  showTab('diagnostics');
 });

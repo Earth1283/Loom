@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loom Editor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:          #13141e;
+      --surface-1:   #1a1c2b;
+      --surface-2:   #20223a;
+      --surface-3:   #272a42;
+      --border:      #2c3050;
+      --border-hi:   #3a3f62;
+      --accent:      #5b8af0;
+      --accent-dim:  rgba(91,138,240,0.13);
+      --accent-glow: rgba(91,138,240,0.35);
+      --teal:        #3dd6c0;
+      --error:       #ff4d6a;
+      --warn:        #f5a623;
+      --success:     #3dcc8f;
+      --text-1:      #e8eaf4;
+      --text-2:      #9298ba;
+      --text-3:      #5a6080;
+      --font-ui:     'Inter', system-ui, sans-serif;
+      --font-mono:   'JetBrains Mono', monospace;
+      --r:           6px;
+      --r-sm:        4px;
+      --t:           0.13s ease;
+      --actbar-w:    44px;
+      --sidebar-w:   220px;
+      --tabbar-h:    34px;
+      --toolbar-h:   42px;
+      --statusbar-h: 22px;
+    }
+
+    html, body { height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--text-1);
+      font-family: var(--font-ui);
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+    /* ── App wrapper ────────────────────────────────────────── */
+    #app { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+
+    /* ── Activity bar ───────────────────────────────────────── */
+    #act-bar {
+      width: var(--actbar-w);
+      background: var(--surface-1);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 6px 0 8px;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+
+    .act-btn {
+      width: 34px; height: 34px;
+      border: none; background: transparent; cursor: pointer;
+      border-radius: var(--r);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-3);
+      transition: color var(--t), background var(--t);
+      position: relative;
+      flex-shrink: 0;
+    }
+    .act-btn:hover { color: var(--text-2); background: var(--surface-3); }
+    .act-btn.active { color: var(--text-1); }
+    .act-btn.active::before {
+      content: '';
+      position: absolute;
+      left: -1px; top: 50%; transform: translateY(-50%);
+      width: 2px; height: 20px;
+      background: var(--accent);
+      border-radius: 0 2px 2px 0;
+    }
+    .act-spacer { flex: 1; }
+    #act-player {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--surface-3);
+      border: 1px solid var(--border-hi);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700;
+      color: var(--text-2);
+      cursor: default;
+      flex-shrink: 0;
+    }
+
+    /* ── Sidebar ────────────────────────────────────────────── */
+    #sidebar {
+      width: var(--sidebar-w);
+      background: var(--surface-1);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      overflow: hidden;
+      transition: width var(--t), opacity var(--t);
+    }
+    #sidebar.collapsed { width: 0; opacity: 0; pointer-events: none; }
+
+    .side-panel { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+
+    .side-header {
+      height: 32px;
+      padding: 0 8px 0 14px;
+      display: flex; align-items: center; gap: 4px;
+      font-size: 10.5px; font-weight: 600; letter-spacing: 0.8px;
+      text-transform: uppercase; color: var(--text-3);
+      flex-shrink: 0;
+    }
+    .side-header > span { flex: 1; }
+
+    .icon-btn {
+      width: 22px; height: 22px;
+      border: none; background: transparent; cursor: pointer;
+      border-radius: var(--r-sm);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-3); font-size: 14px;
+      transition: color var(--t), background var(--t);
+      flex-shrink: 0; line-height: 1;
+    }
+    .icon-btn:hover { color: var(--text-2); background: var(--surface-3); }
+
+    .side-search {
+      padding: 0 8px 6px;
+      flex-shrink: 0;
+    }
+    .side-search input {
+      width: 100%;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 4px 9px;
+      font-size: 12px; font-family: var(--font-ui);
+      color: var(--text-1); outline: none;
+      transition: border-color var(--t);
+    }
+    .side-search input:focus { border-color: var(--accent); }
+    .side-search input::placeholder { color: var(--text-3); }
+
+    #script-list { flex: 1; overflow-y: auto; padding: 2px 6px 6px; }
+
+    .script-item {
+      padding: 6px 9px;
+      cursor: pointer;
+      font-size: 12px; font-family: var(--font-mono);
+      display: flex; align-items: center; gap: 8px;
+      border-radius: var(--r);
+      color: var(--text-2);
+      border: 1px solid transparent;
+      margin-bottom: 1px;
+      transition: all var(--t);
+      user-select: none;
+    }
+    .script-item:hover { background: var(--surface-3); color: var(--text-1); }
+    .script-item.active {
+      background: var(--accent-dim);
+      border-color: rgba(91,138,240,0.25);
+      color: var(--text-1);
+    }
+
+    .script-status {
+      width: 6px; height: 6px;
+      border-radius: 50%; flex-shrink: 0;
+    }
+    .s-RUNNING  { background: var(--teal);    box-shadow: 0 0 6px var(--teal); }
+    .s-ERROR    { background: var(--error);   box-shadow: 0 0 6px var(--error); }
+    .s-IDLE     { background: var(--warn); }
+    .s-UNLOADED { background: var(--text-3); }
+
+    .script-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .script-row-btns { display: none; gap: 2px; flex-shrink: 0; }
+    .script-item:hover .script-row-btns { display: flex; }
+    .script-row-btns button {
+      width: 18px; height: 18px;
+      border: none; background: transparent; cursor: pointer;
+      border-radius: 3px; font-size: 9px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-3);
+      transition: all var(--t);
+    }
+    .script-row-btns button:hover { background: var(--border-hi); color: var(--text-1); }
+
+    .empty-msg { color: var(--text-3); font-size: 12px; padding: 6px 4px; font-style: italic; }
+
+    /* ── Editor area ────────────────────────────────────────── */
+    #editor-area {
+      flex: 1; display: flex; flex-direction: column;
+      overflow: hidden; min-width: 0;
+    }
+
+    /* ── Tab bar ────────────────────────────────────────────── */
+    #tab-bar {
+      height: var(--tabbar-h);
+      background: var(--surface-1);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: stretch; flex-shrink: 0;
+      overflow-x: auto; overflow-y: hidden;
+    }
+    #tab-bar::-webkit-scrollbar { height: 2px; }
+    #tabs { display: flex; align-items: stretch; flex: 1; }
+
+    .editor-tab {
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 12px 0 13px;
+      cursor: pointer;
+      font-size: 12px; font-family: var(--font-mono);
+      color: var(--text-3);
+      border-right: 1px solid var(--border);
+      white-space: nowrap; flex-shrink: 0;
+      transition: background var(--t), color var(--t);
+      position: relative; min-width: 110px; max-width: 200px;
+    }
+    .editor-tab:hover { background: var(--surface-2); color: var(--text-2); }
+    .editor-tab.active {
+      background: var(--bg);
+      color: var(--text-1);
+    }
+    .editor-tab.active::after {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: var(--accent);
+    }
+    .tab-state-dot {
+      width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0;
+    }
+    .tab-name-text { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .tab-dirty { color: var(--accent); font-size: 13px; flex-shrink: 0; margin-right: -2px; }
+    .tab-close-btn {
+      width: 16px; height: 16px; border-radius: 3px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; line-height: 1;
+      color: var(--text-3); opacity: 0;
+      border: none; background: transparent; cursor: pointer;
+      transition: opacity var(--t), background var(--t), color var(--t);
+      flex-shrink: 0;
+    }
+    .editor-tab:hover .tab-close-btn { opacity: 1; }
+    .tab-close-btn:hover { background: var(--surface-3); color: var(--text-1); }
+
+    #tab-bar-right {
+      display: flex; align-items: center;
+      padding: 0 5px; gap: 2px;
+      border-left: 1px solid var(--border); flex-shrink: 0;
+    }
+
+    /* ── Toolbar ────────────────────────────────────────────── */
+    #toolbar {
+      height: var(--toolbar-h);
+      background: var(--surface-1);
+      border-bottom: 1px solid var(--border);
+      padding: 0 8px;
+      display: flex; align-items: center; gap: 3px;
+      flex-shrink: 0;
+    }
+    #breadcrumb {
+      flex: 1; font-size: 12px; font-family: var(--font-mono);
+      color: var(--text-3); padding: 0 6px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #breadcrumb .bc-file { color: var(--text-1); }
+    .tb-sep { width: 1px; height: 16px; background: var(--border-hi); margin: 0 3px; flex-shrink: 0; }
+
+    /* ── Buttons ────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 10px;
+      border: 1px solid transparent;
+      border-radius: var(--r-sm); cursor: pointer;
+      font-size: 12px; font-family: var(--font-ui); font-weight: 500;
+      white-space: nowrap; line-height: 1;
+      transition: background var(--t), color var(--t), transform 60ms ease;
+      -webkit-font-smoothing: antialiased;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn svg { flex-shrink: 0; }
+
+    .btn-primary   { background: var(--accent); color: #fff; border-color: rgba(255,255,255,0.08); }
+    .btn-primary:hover { background: #6b97f5; }
+    .btn-secondary { background: var(--surface-3); color: var(--text-2); border-color: var(--border-hi); }
+    .btn-secondary:hover { color: var(--text-1); background: #2d3055; }
+    .btn-danger    { background: rgba(255,77,106,0.1); color: var(--error); border-color: rgba(255,77,106,0.22); }
+    .btn-danger:hover { background: rgba(255,77,106,0.2); }
+    .btn-success   { background: rgba(61,204,143,0.1); color: var(--success); border-color: rgba(61,204,143,0.22); }
+    .btn-success:hover { background: rgba(61,204,143,0.2); }
+
+    /* ── Monaco ─────────────────────────────────────────────── */
+    #editor-container { flex: 1; min-height: 0; }
+
+    /* ── Resize handle ──────────────────────────────────────── */
+    #panel-resize {
+      height: 4px; background: transparent; cursor: row-resize;
+      flex-shrink: 0; transition: background var(--t);
+    }
+    #panel-resize:hover { background: var(--accent); }
+
+    /* ── Bottom panel ───────────────────────────────────────── */
+    #bottom-panel {
+      background: var(--surface-1);
+      border-top: 1px solid var(--border);
+      display: flex; flex-direction: column; flex-shrink: 0;
+      height: 170px;
+    }
+    #bottom-tabs {
+      display: flex; height: 30px;
+      border-bottom: 1px solid var(--border);
+      padding: 0 6px; flex-shrink: 0;
+    }
+    .btab {
+      padding: 0 12px;
+      font-size: 11.5px; font-weight: 500;
+      cursor: pointer; border: none; background: transparent;
+      color: var(--text-3);
+      border-bottom: 2px solid transparent;
+      display: flex; align-items: center; gap: 6px;
+      transition: color var(--t), border-color var(--t);
+      white-space: nowrap;
+    }
+    .btab:hover { color: var(--text-2); }
+    .btab.active { color: var(--text-1); border-bottom-color: var(--accent); }
+
+    .count-badge {
+      background: var(--error); color: #fff;
+      font-size: 9px; font-weight: 700;
+      border-radius: 8px; padding: 1px 5px;
+      min-width: 14px; text-align: center;
+    }
+    .badge-warn { background: var(--warn); color: #1a1000; }
+
+    #bottom-content {
+      flex: 1; overflow-y: auto; min-height: 0;
+      font-size: 12px; font-family: var(--font-mono); line-height: 1.7;
+    }
+    #tab-problems, #tab-git, #tab-output { padding: 6px 14px; }
+
+    .diag-item {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 2px 4px; border-radius: var(--r-sm);
+      cursor: pointer; transition: background var(--t);
+    }
+    .diag-item:hover { background: var(--surface-2); }
+    .dsev { font-size: 11px; width: 12px; text-align: center; flex-shrink: 0; }
+    .dsev-E { color: var(--error); }
+    .dsev-W { color: var(--warn); }
+    .dsev-I { color: var(--text-3); }
+    .dsev-U { color: var(--text-3); font-style: italic; }
+    .dloc { color: var(--text-3); font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+    .dmsg { color: var(--text-1); }
+
+    .commit-item {
+      padding: 5px 0; border-bottom: 1px solid var(--border);
+      display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    }
+    .commit-hash { color: var(--accent); cursor: pointer; font-size: 11px; }
+    .commit-hash:hover { text-decoration: underline; }
+    .commit-msg  { color: var(--text-1); font-family: var(--font-ui); }
+    .commit-meta { color: var(--text-3); font-size: 11px; font-family: var(--font-ui); }
+
+    .out-line { color: var(--text-2); }
+    .out-ok   { color: var(--success); }
+    .out-err  { color: var(--error); }
+    .out-warn { color: var(--warn); }
+
+    .loom-unreachable { opacity: 0.35; }
+
+    /* ── Status bar ─────────────────────────────────────────── */
+    #status-bar {
+      height: var(--statusbar-h);
+      background: #2c3a8a;
+      display: flex; align-items: stretch;
+      padding: 0; flex-shrink: 0;
+      font-size: 11.5px; color: rgba(255,255,255,0.88);
+      transition: background 0.2s ease;
+    }
+    #status-bar.sb-error { background: #7d1a2e; }
+    #status-bar.sb-warn  { background: #6b4400; }
+    #status-bar.sb-idle  { background: #1e2240; }
+
+    #sb-left  { display: flex; align-items: stretch; }
+    #sb-center { flex: 1; display: flex; align-items: center; justify-content: center; }
+    #sb-right { display: flex; align-items: stretch; }
+
+    .sb-item {
+      display: flex; align-items: center; gap: 4px;
+      padding: 0 8px; white-space: nowrap;
+      cursor: default; transition: background var(--t);
+    }
+    .sb-item.clickable:hover { background: rgba(0,0,0,0.2); cursor: pointer; }
+    .sb-conn-dot { font-size: 8px; }
+
+    /* ── Toast ──────────────────────────────────────────────── */
+    #toast-container {
+      position: fixed;
+      bottom: calc(var(--statusbar-h) + 12px); right: 14px;
+      z-index: 800; display: flex; flex-direction: column;
+      gap: 7px; align-items: flex-end; pointer-events: none;
+    }
+    .toast {
+      background: var(--surface-2);
+      border: 1px solid var(--border-hi);
+      border-radius: var(--r);
+      padding: 9px 14px;
+      font-size: 12.5px; font-family: var(--font-ui);
+      display: flex; align-items: center; gap: 9px;
+      max-width: 330px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+      transform: translateX(16px); opacity: 0;
+      transition: transform 0.22s cubic-bezier(0.34,1.56,0.64,1), opacity 0.22s ease;
+      pointer-events: all;
+    }
+    .toast.toast-in { transform: translateX(0); opacity: 1; }
+    .toast-s { border-left: 3px solid var(--success); }
+    .toast-e { border-left: 3px solid var(--error); }
+    .toast-w { border-left: 3px solid var(--warn); }
+    .toast-i { border-left: 3px solid var(--accent); }
+    .toast-icon { font-size: 13px; flex-shrink: 0; }
+    .toast-s .toast-icon { color: var(--success); }
+    .toast-e .toast-icon { color: var(--error); }
+    .toast-w .toast-icon { color: var(--warn); }
+    .toast-i .toast-icon { color: var(--accent); }
+    .toast-text { color: var(--text-1); line-height: 1.4; }
+
+    /* ── Command palette ────────────────────────────────────── */
+    #cmd-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(5px);
+      z-index: 700;
+      display: none; align-items: flex-start;
+      justify-content: center; padding-top: 14vh;
+    }
+    #cmd-overlay.open { display: flex; }
+
+    #cmd-box {
+      background: var(--surface-2);
+      border: 1px solid var(--border-hi);
+      border-radius: 10px;
+      width: 520px; max-width: 90vw;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.55);
+      overflow: hidden;
+    }
+    #cmd-input-wrap {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    #cmd-input-icon { color: var(--text-3); flex-shrink: 0; }
+    #cmd-input {
+      flex: 1; background: transparent; border: none;
+      font-size: 14px; font-family: var(--font-ui);
+      color: var(--text-1); outline: none;
+    }
+    #cmd-input::placeholder { color: var(--text-3); }
+    #cmd-list { max-height: 340px; overflow-y: auto; }
+    .cmd-item {
+      padding: 8px 16px;
+      display: flex; align-items: center; gap: 10px;
+      cursor: pointer; transition: background var(--t);
+    }
+    .cmd-item.cmd-selected, .cmd-item:hover { background: var(--accent-dim); }
+    .cmd-item-icon { color: var(--text-3); font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; }
+    .cmd-label { flex: 1; font-size: 13px; color: var(--text-1); }
+    .cmd-key { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
+    .cmd-section {
+      padding: 6px 16px 3px;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.8px;
+      text-transform: uppercase; color: var(--text-3);
+    }
+
+    /* ── Auth overlay ───────────────────────────────────────── */
+    #auth-overlay {
+      position: fixed; inset: 0;
+      background: rgba(6,7,14,0.88);
+      backdrop-filter: blur(14px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 900;
+    }
+    #auth-box {
+      background: var(--surface-2);
+      border: 1px solid var(--border-hi);
+      border-radius: 16px;
+      padding: 42px 48px;
+      max-width: 440px; width: 90%;
+      text-align: center;
+      box-shadow: 0 36px 90px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04) inset;
+    }
+    .auth-logo {
+      width: 52px; height: 52px;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--teal) 100%);
+      border-radius: 13px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px; font-weight: 800; color: #fff;
+      margin: 0 auto 20px;
+      box-shadow: 0 8px 28px var(--accent-glow);
+    }
+    .auth-title { font-size: 20px; font-weight: 700; margin-bottom: 5px; }
+    .auth-sub   { font-size: 12.5px; color: var(--text-3); margin-bottom: 26px; }
+    #auth-cmd {
+      font-size: 16px; font-weight: 600; letter-spacing: 2px;
+      color: var(--teal); font-family: var(--font-mono);
+      padding: 13px 18px; margin: 12px 0;
+      background: rgba(61,214,192,0.07);
+      border-radius: var(--r); border: 1px solid rgba(61,214,192,0.18);
+    }
+    #auth-status { font-size: 12px; color: var(--text-3); margin-top: 12px; min-height: 18px; }
+
+    /* ── Modal ──────────────────────────────────────────────── */
+    #modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(6px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 800; opacity: 0; pointer-events: none;
+      transition: opacity 0.14s ease;
+    }
+    #modal-overlay.open { opacity: 1; pointer-events: all; }
+    #modal-box {
+      background: var(--surface-2);
+      border: 1px solid var(--border-hi);
+      border-radius: 10px;
+      padding: 24px 28px;
+      min-width: 340px; max-width: 480px; width: 90%;
+      display: flex; flex-direction: column; gap: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      transform: translateY(-6px) scale(0.98); opacity: 0;
+      transition: transform 0.14s ease, opacity 0.14s ease;
+    }
+    #modal-overlay.open #modal-box { transform: translateY(0) scale(1); opacity: 1; }
+    #modal-title   { font-size: 14px; font-weight: 600; color: var(--text-1); }
+    #modal-message { font-size: 13px; color: var(--text-2); line-height: 1.6; }
+    #modal-input {
+      width: 100%;
+      background: var(--surface-3); border: 1px solid var(--border-hi);
+      color: var(--text-1); padding: 8px 12px;
+      border-radius: var(--r-sm);
+      font-size: 13px; font-family: var(--font-mono); outline: none;
+      transition: border-color 0.14s;
+    }
+    #modal-input:focus { border-color: var(--accent); }
+    #modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+
+<!-- ── Auth overlay ──────────────────────────────────────────── -->
+<div id="auth-overlay">
+  <div id="auth-box">
+    <div class="auth-logo">L</div>
+    <div class="auth-title">Loom Editor</div>
+    <div class="auth-sub">Minecraft Script Engine</div>
+    <div id="auth-cmd">Connecting…</div>
+    <div id="auth-status">Starting up…</div>
+  </div>
+</div>
+
+<!-- ── Modal ─────────────────────────────────────────────────── -->
+<div id="modal-overlay">
+  <div id="modal-box">
+    <div id="modal-title"></div>
+    <div id="modal-message"></div>
+    <input id="modal-input" type="text" autocomplete="off" spellcheck="false">
+    <div id="modal-actions">
+      <button id="modal-cancel" class="btn btn-secondary">Cancel</button>
+      <button id="modal-ok"     class="btn btn-primary">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Command palette ────────────────────────────────────────── -->
+<div id="cmd-overlay">
+  <div id="cmd-box">
+    <div id="cmd-input-wrap">
+      <svg id="cmd-input-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6" cy="6" r="4"/><line x1="9.5" y1="9.5" x2="13" y2="13"/></svg>
+      <input id="cmd-input" placeholder="Type a command…" autocomplete="off" spellcheck="false">
+    </div>
+    <div id="cmd-list"></div>
+  </div>
+</div>
+
+<!-- ── Toast container ───────────────────────────────────────── -->
+<div id="toast-container"></div>
+
+<!-- ── App ───────────────────────────────────────────────────── -->
+<div id="app">
+
+  <!-- Activity bar -->
+  <div id="act-bar">
+    <button class="act-btn active" data-act="files" onclick="setActivity('files')" title="Scripts">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 4.5A1.5 1.5 0 013.5 3h3.379a1.5 1.5 0 011.06.44L9 4.5h3.5A1.5 1.5 0 0114 6v6a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12V4.5z"/>
+      </svg>
+    </button>
+    <button class="act-btn" data-act="git" onclick="setActivity('git')" title="Source Control">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <circle cx="4.5" cy="3.5" r="1.5"/>
+        <circle cx="4.5" cy="11.5" r="1.5"/>
+        <circle cx="10.5" cy="5.5" r="1.5"/>
+        <line x1="4.5" y1="5" x2="4.5" y2="10"/>
+        <path d="M4.5 5C4.5 7.5 9 7.5 9 5.5"/>
+      </svg>
+    </button>
+    <div class="act-spacer"></div>
+    <div id="act-player" title="Connected player">?</div>
+  </div>
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+
+    <!-- Files panel -->
+    <div id="panel-files" class="side-panel">
+      <div class="side-header">
+        <span>Scripts</span>
+        <button class="icon-btn" onclick="newScript()" title="New Script">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="5.5" y1="1" x2="5.5" y2="10"/><line x1="1" y1="5.5" x2="10" y2="5.5"/></svg>
+        </button>
+        <button class="icon-btn" onclick="refreshScripts()" title="Refresh">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6a4 4 0 11-.8-2.4"/><polyline points="10,2 10,5.5 6.5,5.5"/></svg>
+        </button>
+      </div>
+      <div class="side-search">
+        <input id="script-filter" type="text" placeholder="Filter scripts…" oninput="filterScripts(this.value)" autocomplete="off">
+      </div>
+      <div id="script-list"><span class="empty-msg">Loading…</span></div>
+    </div>
+
+    <!-- Git panel -->
+    <div id="panel-git" class="side-panel" style="display:none">
+      <div class="side-header"><span>Source Control</span></div>
+      <div id="git-sidebar" style="padding:8px 14px;font-size:12px;font-family:var(--font-mono)">
+        <span class="empty-msg">Open a script to view its history.</span>
+      </div>
+    </div>
+
+  </div><!-- /sidebar -->
+
+  <!-- Editor area -->
+  <div id="editor-area">
+
+    <!-- Tab bar -->
+    <div id="tab-bar">
+      <div id="tabs"></div>
+      <div id="tab-bar-right">
+        <button class="icon-btn" onclick="openCommandPalette()" title="Command Palette (Ctrl+K)" style="font-size:11px;font-family:var(--font-ui);width:auto;padding:0 7px;gap:3px">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="1" y="1" width="10" height="10" rx="2"/><line x1="3.5" y1="4.5" x2="8.5" y2="4.5"/><line x1="3.5" y1="7.5" x2="6.5" y2="7.5"/></svg>
+          <span style="color:var(--text-3)">Ctrl+K</span>
+        </button>
+        <button class="icon-btn" onclick="toggleSidebar()" title="Toggle Sidebar (Ctrl+B)">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="1" y="1" width="11" height="11" rx="2"/><line x1="4.5" y1="1" x2="4.5" y2="12"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div id="toolbar">
+      <div id="breadcrumb"><span style="color:var(--text-3)">No script open</span></div>
+      <div style="display:flex;align-items:center;gap:3px;flex-shrink:0">
+        <button class="btn btn-success" onclick="runScript()" title="Load script into server">
+          <svg width="9" height="10" viewBox="0 0 9 10" fill="currentColor"><polygon points="0,0 9,5 0,10"/></svg>
+          Load
+        </button>
+        <button class="btn btn-secondary" onclick="stopScript()" title="Unload script from server">
+          <svg width="9" height="9" viewBox="0 0 9 9" fill="currentColor"><rect width="9" height="9" rx="1.5"/></svg>
+          Unload
+        </button>
+        <button class="btn btn-secondary" onclick="reloadScript()" title="Reload script (Ctrl+Shift+R)">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5.5A4 4 0 115.5 1.5"/><polyline points="9.5,1 9.5,5.5 5,5.5"/></svg>
+          Reload
+        </button>
+        <div class="tb-sep"></div>
+        <button class="btn btn-primary" onclick="saveScript()" title="Save &amp; commit (Ctrl+S)">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 1v8M3 6l3 3 3-3"/><line x1="1.5" y1="11" x2="10.5" y2="11"/></svg>
+          Save
+        </button>
+        <button class="btn btn-secondary" onclick="validateScript()" title="Validate current script">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,5.5 4,8.5 10,2"/></svg>
+          Validate
+        </button>
+        <div class="tb-sep"></div>
+        <button class="btn btn-danger" onclick="deleteScript()" title="Delete current script">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,2.5 10,2.5"/><path d="M3.5 2.5V2a.7.7 0 01.7-.7h2.6a.7.7 0 01.7.7v.5"/><path d="M1.5 2.5l.7 7.3h6.6l.7-7.3"/></svg>
+          Delete
+        </button>
+      </div>
+    </div>
+
+    <!-- Monaco editor -->
+    <div id="editor-container"></div>
+
+    <!-- Resize handle -->
+    <div id="panel-resize"></div>
+
+    <!-- Bottom panel -->
+    <div id="bottom-panel">
+      <div id="bottom-tabs">
+        <button class="btab active" data-tab="problems" onclick="showBottomTab('problems')">
+          Problems <span id="prob-badge" style="display:none" class="count-badge"></span>
+        </button>
+        <button class="btab" data-tab="git" onclick="showBottomTab('git')">Git Log</button>
+        <button class="btab" data-tab="output" onclick="showBottomTab('output')">Output</button>
+      </div>
+      <div id="bottom-content">
+        <div id="tab-problems"><span class="empty-msg">No problems detected.</span></div>
+        <div id="tab-git"    style="display:none"><span class="empty-msg">Open a script to see its commit history.</span></div>
+        <div id="tab-output" style="display:none"></div>
+      </div>
+    </div>
+
+  </div><!-- /editor-area -->
+
+</div><!-- /app -->
+
+<!-- ── Status bar ─────────────────────────────────────────────── -->
+<div id="status-bar">
+  <div id="sb-left">
+    <span id="sb-conn" class="sb-item">
+      <span class="sb-conn-dot">●</span>
+      Disconnected
+    </span>
+    <span id="sb-player" class="sb-item" style="display:none"></span>
+  </div>
+  <div id="sb-center">
+    <span id="sb-script" class="sb-item">Loom Editor</span>
+    <span id="sb-state"  class="sb-item" style="color:rgba(255,255,255,0.55)"></span>
+  </div>
+  <div id="sb-right">
+    <span id="sb-diags" class="sb-item clickable" onclick="showBottomTab('problems')" style="display:none"></span>
+    <span id="sb-pos"   class="sb-item">Ln 1, Col 1</span>
+    <span class="sb-item">Loom</span>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
+<script src="/loom-language.js"></script>
+<script src="/editor.js"></script>
+</body>
+</html>

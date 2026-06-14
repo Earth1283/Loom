@@ -93,6 +93,15 @@ class ScriptManager(private val plugin: Plugin, private val scriptsDir: File) {
         scriptFile(name).delete()
     }
 
+    fun renameScript(oldName: String, newName: String): Boolean {
+        val oldFile = scriptFile(oldName)
+        val newFile = scriptFile(newName)
+        if (!oldFile.exists() || newFile.exists()) return false
+        unload(oldName)
+        oldFile.renameTo(newFile)
+        return true
+    }
+
     fun listScripts(): List<String> =
         scriptsDir.listFiles { f -> f.extension == "loom" }
             ?.map { it.nameWithoutExtension } ?: emptyList()
