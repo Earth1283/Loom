@@ -1,0 +1,90 @@
+script "CoinTracker" {
+  var coins      = {}
+  var START      = 100   // Starting balance for new players.
+  var PLAY_BONUS = 10    // Coins earned every 5 minutes of playtime.
+
+  fun bal(name) {
+    if (!contains(coins, name)) { coins[name] = START }
+    return coins[name]
+  }
+
+  on PlayerJoin(player) {
+    player.message("§6Balance: §f" + str(bal(player.name)) + " §6coins.")
+  }
+
+  // Reward playtime.
+  every 5 minutes {
+    for (p in players()) {
+      coins[p.name] = bal(p.name) + PLAY_BONUS
+    }
+  }
+
+  // /coins [player] — check balance.
+  command "coins" {
+    if (argCount == 0) {
+      sender.message("§6Your balance: §f" + str(bal(sender.name)) + " §6coins.")
+      return
+    }
+    var target = player(args[0])
+    if (target == null) {
+      sender.message("§cNo player named §f" + args[0] + " §cis online.")
+      return
+    }
+    sender.message("§f" + target.name + "§6 has §f" + str(bal(target.name)) + " §6coins.")
+  }
+
+  // /pay <player> <amount> — send coins to another player.
+  command "pay" {
+    if (argCount < 2) {
+      sender.message("§cUsage: /pay <player> <amount>")
+      return
+    }
+    var target = player(args[0])
+    if (target == null) {
+      sender.message("§cNo player named §f" + args[0] + " §cis online.")
+      return
+    }
+    if (target.name == sender.name) {
+      sender.message("§cYou cannot pay yourself.")
+      return
+    }
+    var amount = num(args[1])
+    if (amount == null or amount <= 0) {
+      sender.message("§cAmount must be a positive number.")
+      return
+    }
+    if (bal(sender.name) < amount) {
+      sender.message("§cInsufficient funds. You have §f" + str(bal(sender.name)) + " §ccoins.")
+      return
+    }
+    coins[sender.name] = bal(sender.name) - amount
+    coins[target.name] = bal(target.name) + amount
+    sender.message("§aPaid §f" + str(amount) + " §acoins to §f" + target.name + "§a.")
+    target.message("§aReceived §f" + str(amount) + " §acoins from §f" + sender.name + "§a.")
+  }
+
+  // /givecoin <player> <amount> — op-only balance injection.
+  command "givecoin" {
+    if (!sender.isOp) {
+      sender.message("§cOps only.")
+      return
+    }
+    if (argCount < 2) {
+      sender.message("§cUsage: /givecoin <player> <amount>")
+      return
+    }
+    var target = player(args[0])
+    if (target == null) {
+      sender.message("§cNo player named §f" + args[0] + " §cis online.")
+      return
+    }
+    var amount = num(args[1])
+    if (amount == null or amount <= 0) {
+      sender.message("§cAmount must be a positive number.")
+      return
+    }
+    coins[target.name] = bal(target.name) + amount
+    sender.message("§aGave §f" + str(amount) + " §acoins to §f" + target.name + "§a.")
+    target.message("§6An admin credited you §f" + str(amount) + " §6coins.")
+  }
+}

@@ -1,0 +1,53 @@
+script "CombatLogger" {
+  // Remaining combat-tag seconds per player name.
+  var combatSecs = {}
+  var TAG_SECS   = 15
+
+  fun tag(name) {
+    combatSecs[name] = TAG_SECS
+  }
+
+  fun inCombat(name) {
+    return contains(combatSecs, name) and combatSecs[name] > 0
+  }
+
+  on EntityDamageByEntity(player, attacker, damage) {
+    // Only track player-vs-player hits.
+    if (player == null or attacker == null) { return }
+    tag(player.name)
+    tag(attacker.name)
+    player.actionBar("§c⚔ In combat — §f" + str(combatSecs[player.name]) + "s§c remaining. Don't log out!")
+    attacker.actionBar("§c⚔ In combat — §f" + str(combatSecs[attacker.name]) + "s§c remaining. Don't log out!")
+  }
+
+  // Count down one second at a time.
+  every 20 ticks {
+    var names = keys(combatSecs)
+    for (name in names) {
+      combatSecs[name] = combatSecs[name] - 1
+      if (combatSecs[name] <= 0) {
+        remove(combatSecs, name)
+        var p = player(name)
+        if (p != null) {
+          p.actionBar("§aCombat tag cleared.")
+        }
+      }
+    }
+  }
+
+  // Log-out during combat = public shaming.
+  on PlayerQuit(player) {
+    if (inCombat(player.name)) {
+      broadcast("§c§l" + player.name + " §r§cdisconnected during combat!")
+      remove(combatSecs, player.name)
+    }
+  }
+
+  command "combat" {
+    if (inCombat(sender.name)) {
+      sender.message("§c⚔ You are in combat. §7(" + str(combatSecs[sender.name]) + "s remaining)")
+    } else {
+      sender.message("§aYou are not in combat.")
+    }
+  }
+}

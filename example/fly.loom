@@ -1,0 +1,15 @@
+script "FlyCommand" {
+  var flyState = {}
+
+  command "fly" {
+    var name = sender.name
+    if (!contains(flyState, name)) { flyState[name] = false }
+    flyState[name] = !flyState[name]
+    sender.setFlying(flyState[name])
+    if (flyState[name]) {
+      sender.message("§aFlight §lenabled§r§a.")
+    } else {
+      sender.message("§cFlight §ldisabled§r§c.")
+    }
+  }
+}

@@ -1,0 +1,53 @@
+script "HotPotato" {
+  var holder  = null
+  var running = false
+
+  // /hotpotato start — any op can kick off a game.
+  command "hotpotato" {
+    if (!sender.isOp) {
+      sender.message("§cOps only.")
+      return
+    }
+    if (running) {
+      sender.message("§cA game is already running!")
+      return
+    }
+    var online = players()
+    if (len(online) < 2) {
+      sender.message("§cNeed at least 2 online players.")
+      return
+    }
+
+    running = true
+    holder  = online[floor(random() * len(online))]
+    holder.give(Item.BAKED_POTATO, 1)
+    holder.playSound("ENTITY_BLAZE_SHOOT")
+    broadcast("§6§lHOT POTATO §r§6has begun! §e" + holder.name + " §6has the potato!")
+  }
+
+  // Every 30 seconds the potato explodes in the holder's hands.
+  every 600 ticks {
+    if (!running or holder == null) { return }
+
+    holder.effect("HARM", 1, 0)
+    broadcast("§c" + holder.name + " §7was holding the hot potato! §c(-1 heart)")
+
+    var online = players()
+    if (len(online) < 2) {
+      broadcast("§6Hot Potato ended — not enough players remaining.")
+      running = false
+      holder  = null
+      return
+    }
+
+    // Pick a new random holder.
+    var next = holder
+    while (next.name == holder.name) {
+      next = online[floor(random() * len(online))]
+    }
+    holder = next
+    holder.give(Item.BAKED_POTATO, 1)
+    holder.playSound("ENTITY_BLAZE_SHOOT")
+    broadcast("§e" + holder.name + " §6now has the hot potato!")
+  }
+}
