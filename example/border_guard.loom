@@ -3,10 +3,14 @@ script "BorderGuard" {
   var WARN_AT  = 460.0
 
   on PlayerMove(player, fromX, fromY, fromZ, toX, toY, toZ) {
+    if (floor(fromX) == floor(toX) && floor(fromZ) == floor(toZ)) {
+      return
+    }
+
     var dist = max(abs(toX), abs(toZ))
 
     if (dist >= BORDER) {
-      player.teleport(player.world, 0, 64, 0)
+      player.teleport(player.world, 0.0, 64.0, 0.0)
       player.message("§cSent back to spawn — the world border is ±" + str(BORDER) + " blocks.")
       return
     }
