@@ -6,10 +6,12 @@ import org.eclipse.jgit.lib.PersonIdent
 import org.eclipse.jgit.revwalk.RevCommit
 import org.eclipse.jgit.diff.DiffFormatter
 import org.eclipse.jgit.diff.RawTextComparator
+import kotlinx.serialization.Serializable
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.logging.Logger
 
+@Serializable
 data class CommitInfo(
     val hash: String,
     val shortHash: String,

@@ -14,7 +14,7 @@ import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import io.ktor.http.*
 import io.ktor.server.request.*
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.*
 import org.bukkit.plugin.Plugin
 import java.util.logging.Logger
 import kotlin.time.Duration.Companion.seconds
@@ -40,7 +40,8 @@ class WebServer(
             install(StatusPages) {
                 exception<Throwable> { call, cause ->
                     logger.warning("Web error: ${cause.message}")
-                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (cause.message ?: "Unknown error")))
+                    call.respond(HttpStatusCode.InternalServerError,
+                        buildJsonObject { put("error", cause.message ?: "Unknown error") })
                 }
             }
 
@@ -55,10 +56,10 @@ class WebServer(
                 }
                 get("/auth/status/{sessionId}") {
                     val sessionId = call.parameters["sessionId"] ?: return@get call.respond(HttpStatusCode.BadRequest)
-                    call.respond(mapOf(
-                        "authenticated" to auth.isAuthenticated(sessionId),
-                        "player" to (auth.getPlayerName(sessionId) ?: "")
-                    ))
+                    call.respond(buildJsonObject {
+                        put("authenticated", auth.isAuthenticated(sessionId))
+                        put("player", auth.getPlayerName(sessionId) ?: "")
+                    })
                 }
                 post("/auth/revoke/{sessionId}") {
                     val sessionId = call.parameters["sessionId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
@@ -125,21 +126,27 @@ class WebServer(
                     if (!requireAuth(call, sessionId)) return@post
                     val name = call.parameters["name"] ?: return@post call.respond(HttpStatusCode.BadRequest)
                     val diags = scripts.load(name)
-                    call.respond(mapOf("diagnostics" to diags, "state" to (scripts.get(name)?.state?.name ?: "ERROR")))
+                    call.respond(buildJsonObject {
+                        put("state", scripts.get(name)?.state?.name ?: "ERROR")
+                        put("diagnostics", diagsToJson(diags))
+                    })
                 }
                 post("/scripts/{name}/unload") {
                     val sessionId = call.request.header("X-Session-Id") ?: return@post call.respond(HttpStatusCode.Unauthorized)
                     if (!requireAuth(call, sessionId)) return@post
                     val name = call.parameters["name"] ?: return@post call.respond(HttpStatusCode.BadRequest)
                     scripts.unload(name)
-                    call.respond(mapOf("ok" to true))
+                    call.respond(buildJsonObject { put("ok", true) })
                 }
                 post("/scripts/{name}/reload") {
                     val sessionId = call.request.header("X-Session-Id") ?: return@post call.respond(HttpStatusCode.Unauthorized)
                     if (!requireAuth(call, sessionId)) return@post
                     val name = call.parameters["name"] ?: return@post call.respond(HttpStatusCode.BadRequest)
                     val diags = scripts.reload(name)
-                    call.respond(mapOf("diagnostics" to diags, "state" to (scripts.get(name)?.state?.name ?: "ERROR")))
+                    call.respond(buildJsonObject {
+                        put("state", scripts.get(name)?.state?.name ?: "ERROR")
+                        put("diagnostics", diagsToJson(diags))
+                    })
                 }
 
                 // Validate (no disk write)
@@ -150,7 +157,7 @@ class WebServer(
                     val body = call.receive<Map<String, String>>()
                     val source = body["source"] ?: return@post call.respond(HttpStatusCode.BadRequest)
                     val diags = scripts.validate(name, source)
-                    call.respond(mapOf("diagnostics" to diags))
+                    call.respond(buildJsonObject { put("diagnostics", diagsToJson(diags)) })
                 }
 
                 // Git routes
@@ -159,13 +166,13 @@ class WebServer(
                     if (!requireAuth(call, sessionId)) return@get
                     val name = call.parameters["name"] ?: return@get call.respond(HttpStatusCode.BadRequest)
                     val commits = scripts.repo.log("$name.loom")
-                    call.respond(commits)
+                    call.respond<List<io.github.earth1283.loom.git.CommitInfo>>(commits)
                 }
                 get("/git/log") {
                     val sessionId = call.request.header("X-Session-Id") ?: return@get call.respond(HttpStatusCode.Unauthorized)
                     if (!requireAuth(call, sessionId)) return@get
                     val commits = scripts.repo.log()
-                    call.respond(commits)
+                    call.respond<List<io.github.earth1283.loom.git.CommitInfo>>(commits)
                 }
                 get("/git/{name}/diff") {
                     val sessionId = call.request.header("X-Session-Id") ?: return@get call.respond(HttpStatusCode.Unauthorized)
@@ -185,7 +192,7 @@ class WebServer(
                     val name = call.parameters["name"] ?: return@post call.respond(HttpStatusCode.BadRequest)
                     val hash = call.parameters["hash"] ?: return@post call.respond(HttpStatusCode.BadRequest)
                     val ok = scripts.repo.checkout(hash, "$name.loom")
-                    call.respond(mapOf("ok" to ok))
+                    call.respond(buildJsonObject { put("ok", ok) })
                 }
                 get("/git/{name}/show/{hash}") {
                     val sessionId = call.request.header("X-Session-Id") ?: return@get call.respond(HttpStatusCode.Unauthorized)
@@ -203,7 +210,16 @@ class WebServer(
                     val msg = body["message"] ?: "Manual commit"
                     val player = auth.getPlayerName(sessionId) ?: "Loom"
                     val commit = scripts.repo.commitAll(msg, player)
-                    call.respond(mapOf("ok" to (commit != null), "commit" to commit))
+                    call.respond(buildJsonObject {
+                        put("ok", commit != null)
+                        if (commit != null) put("commit", buildJsonObject {
+                            put("hash", commit.hash)
+                            put("shortHash", commit.shortHash)
+                            put("message", commit.message)
+                            put("author", commit.author)
+                            put("timestamp", commit.timestamp)
+                        })
+                    })
                 }
 
                 // WebSocket for live diagnostics
@@ -238,6 +254,16 @@ class WebServer(
     fun stop() {
         server?.stop(1000, 2000)
         server = null
+    }
+
+    private fun diagsToJson(diags: List<io.github.earth1283.loom.lang.Diagnostic>) = buildJsonArray {
+        diags.forEach { d ->
+            add(buildJsonObject {
+                put("line", d.line); put("col", d.col)
+                put("endLine", d.endLine); put("endCol", d.endCol)
+                put("message", d.message); put("severity", d.severity.name)
+            })
+        }
     }
 
     private suspend fun requireAuth(call: ApplicationCall, sessionId: String): Boolean {
