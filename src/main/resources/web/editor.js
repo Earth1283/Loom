@@ -41,6 +41,18 @@ let unreachDecs    = null;
 const editorModels = {};   // { name: ITextModel }
 const pendingOpens = new Set(); // guard against concurrent openTab calls for same name
 
+// ── Settings defaults ──────────────────────────────────────────────
+const DEFAULTS = {
+  fontSize: 14, fontFamily: "'JetBrains Mono', monospace",
+  tabSize: 2, wordWrap: 'off', minimap: false, lineNumbers: 'on',
+  renderWhitespace: 'selection', smoothScrolling: true, scrollBeyondLastLine: false,
+  cursorStyle: 'line', cursorBlinking: 'smooth', bracketPairColorization: true,
+  accentColor: '#5b8af0', uiFontSize: 13, showStatusBar: true,
+  autoValidate: true, validateDelay: 600, confirmClose: true,
+  commitMsgTemplate: 'Update {name}.loom',
+};
+let CFG = Object.assign({}, DEFAULTS);
+
 // ── Context menu ──────────────────────────────────────────────────
 const ctxMenu = (function() {
   var el = null, _dismiss = null;
@@ -85,6 +97,31 @@ const ctxMenu = (function() {
   return { show: show, hide: hide };
 }());
 
+// ── SVG icons ─────────────────────────────────────────────────────
+const SVG = {
+  filePlus: '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 1.5H3a1 1 0 00-1 1v8a1 1 0 001 1h7a1 1 0 001-1V5.5L7.5 1.5z"/><polyline points="7.5,1.5 7.5,6 11,6"/><line x1="5" y1="9" x2="9" y2="9"/><line x1="7" y1="7" x2="7" y2="11"/></svg>',
+  save:    '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 1.5v7.5M4 6.5l2.5 2.5L9 6.5"/><line x1="2" y1="11.5" x2="11" y2="11.5"/></svg>',
+  play:    '<svg width="11" height="12" viewBox="0 0 11 12" fill="currentColor"><polygon points="1,0.5 10.5,6 1,11.5"/></svg>',
+  stop:    '<svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><rect width="10" height="10" rx="1.5"/></svg>',
+  refresh: '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 6.5A4.5 4.5 0 116.5 2"/><polyline points="11,2 11,6.5 6.5,6.5"/></svg>',
+  check:   '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="1.5,6 4.5,9.5 10.5,2.5"/></svg>',
+  pencil:  '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 1.5l2 2-7 7H1.5v-2l7-7z"/></svg>',
+  trash:   '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,3 11,3"/><path d="M4 3V2a.75.75 0 01.75-.75h2.5A.75.75 0 018 2v1"/><path d="M2 3l.75 7.5h6.5L10 3"/></svg>',
+  sidebar: '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="1" y="1" width="11" height="11" rx="2"/><line x1="4.5" y1="1" x2="4.5" y2="12"/></svg>',
+  warning: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 1L11.5 11H0.5L6 1z"/><line x1="6" y1="5" x2="6" y2="7.5"/><circle cx="6" cy="9.5" r="0.5" fill="currentColor" stroke="none"/></svg>',
+  git:     '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="4" cy="3" r="1.5"/><circle cx="4" cy="10" r="1.5"/><circle cx="9.5" cy="5" r="1.5"/><line x1="4" y1="4.5" x2="4" y2="8.5"/><path d="M4 4.5C4 7 8 7 8 5"/></svg>',
+  terminal:'<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="1" width="11" height="11" rx="2"/><polyline points="3.5,4.5 5.5,6.5 3.5,8.5"/><line x1="6.5" y1="8.5" x2="9.5" y2="8.5"/></svg>',
+  folder:  '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4A1.5 1.5 0 012.5 2.5h2.59a1.5 1.5 0 011.06.44L7 3.5H10.5A1.5 1.5 0 0112 5v5a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 011 10V4z"/></svg>',
+  copy:    '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.5"/><path d="M8 4V2.5A1.5 1.5 0 006.5 1h-5A1.5 1.5 0 000 2.5v5A1.5 1.5 0 001.5 9H3"/></svg>',
+  close:   '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>',
+  user:    '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="4" r="2.5"/><path d="M1.5 11c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4"/></svg>',
+  gear:    '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="6.5" r="2"/><path d="M6.5 1v1.7M6.5 11.3V13M1 6.5h1.7M11.3 6.5H13M2.55 2.55l1.2 1.2M9.25 9.25l1.2 1.2M10.45 2.55l-1.2 1.2M3.75 9.25l-1.2 1.2"/></svg>',
+  success: '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,6.5 5,9.5 11,3.5"/></svg>',
+  error:   '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="2.5" y1="2.5" x2="10.5" y2="10.5"/><line x1="10.5" y1="2.5" x2="2.5" y2="10.5"/></svg>',
+  info:    '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><line x1="6.5" y1="5.5" x2="6.5" y2="9.5"/><circle cx="6.5" cy="3.5" r="0.7" fill="currentColor" stroke="none"/></svg>',
+  extLink: '<svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 1H1.5A.5.5 0 001 1.5v8a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V7"/><polyline points="7,1 10,1 10,4"/><line x1="5.5" y1="5.5" x2="10" y2="1"/></svg>',
+};
+
 // ── Utils ─────────────────────────────────────────────────────────
 function esc(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function escJ(s) { return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
@@ -118,8 +155,10 @@ function _createModel(name, source) {
   const model = monaco.editor.createModel(source, 'loom', uri);
   model.onDidChangeContent(() => {
     _markDirty(name, true);
-    clearTimeout(validateTimer);
-    validateTimer = setTimeout(validateCurrent, 600);
+    if (CFG.autoValidate) {
+      clearTimeout(validateTimer);
+      validateTimer = setTimeout(validateCurrent, CFG.validateDelay);
+    }
   });
   editorModels[name] = model;
   return model;
@@ -141,7 +180,7 @@ function activateTab(name) {
 function closeTab(name, ev) {
   ev && ev.stopPropagation();
   const tab = S.tabs.find(t => t.name === name);
-  if (tab && tab.dirty) {
+  if (tab && tab.dirty && CFG.confirmClose) {
     if (!confirm(name + '.loom has unsaved changes. Close anyway?')) return;
   }
   const model = editorModels[name];
@@ -185,7 +224,7 @@ function renderTabs() {
 function toast(msg, type, duration) {
   type     = type     || 'i';
   duration = duration || 3500;
-  const icons = { s:'✓', e:'✗', w:'⚠', i:'·' };
+  const icons = { s: SVG.success, e: SVG.error, w: SVG.warning, i: SVG.info };
   const container = el('toast-container');
   const div = document.createElement('div');
   div.className = 'toast toast-' + type;
@@ -201,21 +240,22 @@ function toast(msg, type, duration) {
 
 // ── Command palette ────────────────────────────────────────────────
 var COMMANDS = [
-  { label:'New Script',       key:'Ctrl+N',        icon:'📄', fn: function() { newScript(); } },
-  { label:'Save Script',      key:'Ctrl+S',        icon:'💾', fn: function() { saveScript(); } },
-  { label:'Load Script',      key:'Ctrl+Enter',    icon:'▶',  fn: function() { runScript(); } },
-  { label:'Unload Script',    key:'',              icon:'■',  fn: function() { stopScript(); } },
-  { label:'Reload Script',    key:'Ctrl+Shift+R',  icon:'↺',  fn: function() { reloadScript(); } },
-  { label:'Validate',         key:'',              icon:'✓',  fn: function() { validateScript(); } },
-  { label:'Rename Script',    key:'',              icon:'✏',  fn: function() { renameScript(); } },
-  { label:'Delete Script',    key:'',              icon:'🗑', fn: function() { deleteScript(); } },
-  { label:'Toggle Sidebar',   key:'Ctrl+B',        icon:'☰',  fn: function() { toggleSidebar(); } },
-  { label:'Refresh Scripts',  key:'',              icon:'↺',  fn: function() { refreshScripts(); } },
-  { label:'Show Problems',    key:'',              icon:'⚠',  fn: function() { showBottomTab('problems'); } },
-  { label:'Show Git Log',     key:'',              icon:'◎',  fn: function() { showBottomTab('git'); } },
-  { label:'Show Output',      key:'',              icon:'≡',  fn: function() { showBottomTab('output'); } },
-  { label:'Files View',       key:'',              icon:'📁', fn: function() { setActivity('files'); } },
-  { label:'Git View',         key:'',              icon:'◎',  fn: function() { setActivity('git'); } },
+  { label:'New Script',       key:'Ctrl+N',        icon: SVG.filePlus, fn: function() { newScript(); } },
+  { label:'Save Script',      key:'Ctrl+S',        icon: SVG.save,     fn: function() { saveScript(); } },
+  { label:'Load Script',      key:'Ctrl+Enter',    icon: SVG.play,     fn: function() { runScript(); } },
+  { label:'Unload Script',    key:'',              icon: SVG.stop,     fn: function() { stopScript(); } },
+  { label:'Reload Script',    key:'Ctrl+Shift+R',  icon: SVG.refresh,  fn: function() { reloadScript(); } },
+  { label:'Validate',         key:'',              icon: SVG.check,    fn: function() { validateScript(); } },
+  { label:'Rename Script',    key:'',              icon: SVG.pencil,   fn: function() { renameScript(); } },
+  { label:'Delete Script',    key:'',              icon: SVG.trash,    fn: function() { deleteScript(); } },
+  { label:'Toggle Sidebar',   key:'Ctrl+B',        icon: SVG.sidebar,  fn: function() { toggleSidebar(); } },
+  { label:'Refresh Scripts',  key:'',              icon: SVG.refresh,  fn: function() { refreshScripts(); } },
+  { label:'Show Problems',    key:'',              icon: SVG.warning,  fn: function() { showBottomTab('problems'); } },
+  { label:'Show Git Log',     key:'',              icon: SVG.git,      fn: function() { showBottomTab('git'); } },
+  { label:'Show Output',      key:'',              icon: SVG.terminal, fn: function() { showBottomTab('output'); } },
+  { label:'Files View',       key:'',              icon: SVG.folder,   fn: function() { setActivity('files'); } },
+  { label:'Git View',         key:'',              icon: SVG.git,      fn: function() { setActivity('git'); } },
+  { label:'Settings',         key:'Ctrl+,',        icon: SVG.gear,     fn: function() { openSettings(); } },
 ];
 var filteredCmds = COMMANDS;
 var cmdIdx = 0;
@@ -358,24 +398,18 @@ function initEditor() {
     if (window.registerLoomLanguage) window.registerLoomLanguage(monaco);
 
     editor = monaco.editor.create(el('editor-container'), {
-      language: 'loom',
-      theme: 'loom-dark',
-      value: '',
+      language: 'loom', theme: 'loom-dark', value: '',
       automaticLayout: true,
-      fontSize: 14,
-      lineNumbers: 'on',
-      minimap: { enabled: false },
-      wordWrap: 'off',
-      tabSize: 2,
-      insertSpaces: true,
-      scrollBeyondLastLine: false,
-      renderWhitespace: 'selection',
-      bracketPairColorization: { enabled: true },
-      cursorStyle: 'line',
-      cursorBlinking: 'smooth',
+      fontSize: CFG.fontSize, fontFamily: CFG.fontFamily,
+      lineNumbers: CFG.lineNumbers, minimap: { enabled: CFG.minimap },
+      wordWrap: CFG.wordWrap, tabSize: CFG.tabSize, insertSpaces: true,
+      scrollBeyondLastLine: CFG.scrollBeyondLastLine,
+      renderWhitespace: CFG.renderWhitespace,
+      bracketPairColorization: { enabled: CFG.bracketPairColorization },
+      cursorStyle: CFG.cursorStyle, cursorBlinking: CFG.cursorBlinking,
       cursorSmoothCaretAnimation: 'on',
       padding: { top: 8, bottom: 8 },
-      smoothScrolling: true,
+      smoothScrolling: CFG.smoothScrolling,
       suggest: { showKeywords: true },
     });
 
@@ -545,8 +579,8 @@ function renderScriptList() {
       + '<span class="script-status s-' + s.state + '"></span>'
       + '<span class="script-name">' + esc(s.name) + '.loom</span>'
       + '<span class="script-row-btns">'
-      + '<button onclick="quickLoad(\'' + escJ(s.name) + '\',event)" title="Load">▶</button>'
-      + '<button onclick="quickStop(\'' + escJ(s.name) + '\',event)" title="Unload">■</button>'
+      + '<button onclick="quickLoad(\'' + escJ(s.name) + '\',event)" title="Load">' + SVG.play + '</button>'
+      + '<button onclick="quickStop(\'' + escJ(s.name) + '\',event)" title="Unload">' + SVG.stop + '</button>'
       + '</span>'
       + '</div>';
   }).join('');
@@ -582,7 +616,8 @@ async function saveScript() {
   var msg = await showPrompt('Commit message (leave blank for auto):', '', 'Save ' + name + '.loom');
   if (msg === null) return;
   try {
-    await API.post('/scripts/' + name, { source: source, commitMessage: msg || 'Update ' + name + '.loom' });
+    var autoMsg = CFG.commitMsgTemplate.replace(/\{name\}/g, name);
+    await API.post('/scripts/' + name, { source: source, commitMessage: msg || autoMsg });
     _markDirty(name, false);
     toast('Saved ' + name + '.loom', 's');
     appendOutput('Saved ' + name + '.loom');
@@ -695,28 +730,28 @@ function showScriptCtxMenu(name, x, y) {
   var state  = S.scriptStates[name] || 'UNLOADED';
   var loaded = state !== 'UNLOADED';
   ctxMenu.show([
-    { icon: '↗', label: 'Open',      fn: function() { openTab(name); } },
+    { icon: SVG.extLink, label: 'Open',      fn: function() { openTab(name); } },
     null,
-    { icon: '▶', label: 'Load',      fn: function() { runScript(name); } },
-    { icon: '■', label: 'Unload',    disabled: !loaded, fn: function() { stopScript(name); } },
-    { icon: '↺', label: 'Reload',    disabled: !loaded, fn: function() { reloadScript(name); } },
+    { icon: SVG.play,    label: 'Load',      fn: function() { runScript(name); } },
+    { icon: SVG.stop,    label: 'Unload',    disabled: !loaded, fn: function() { stopScript(name); } },
+    { icon: SVG.refresh, label: 'Reload',    disabled: !loaded, fn: function() { reloadScript(name); } },
     null,
-    { icon: '✏', label: 'Rename…',   fn: function() { renameScript(name); } },
-    { icon: '⧉', label: 'Copy Name', fn: function() { navigator.clipboard.writeText(name).catch(function(){}); toast('Copied', 's', 1500); } },
+    { icon: SVG.pencil,  label: 'Rename…',   fn: function() { renameScript(name); } },
+    { icon: SVG.copy,    label: 'Copy Name', fn: function() { navigator.clipboard.writeText(name).catch(function(){}); toast('Copied', 's', 1500); } },
     null,
-    { icon: '🗑', label: 'Delete',   danger: true, fn: function() { deleteScript(name); } },
+    { icon: SVG.trash,   label: 'Delete',    danger: true, fn: function() { deleteScript(name); } },
   ], x, y);
 }
 
 function showTabCtxMenu(name, x, y) {
   var others = S.tabs.filter(function(t) { return t.name !== name; });
   ctxMenu.show([
-    { icon: '✕', label: 'Close Tab',    key: 'Alt+W', fn: function() { closeTab(name); } },
-    { icon: '',  label: 'Close Others', disabled: others.length === 0, fn: function() { others.forEach(function(t) { closeTab(t.name); }); } },
-    { icon: '',  label: 'Close All',    fn: function() { S.tabs.slice().forEach(function(t) { closeTab(t.name); }); } },
+    { icon: SVG.close,  label: 'Close Tab',    key: 'Alt+W', fn: function() { closeTab(name); } },
+    { icon: '',         label: 'Close Others', disabled: others.length === 0, fn: function() { others.forEach(function(t) { closeTab(t.name); }); } },
+    { icon: '',         label: 'Close All',    fn: function() { S.tabs.slice().forEach(function(t) { closeTab(t.name); }); } },
     null,
-    { icon: '✏', label: 'Rename…',     fn: function() { activateTab(name); renameScript(name); } },
-    { icon: '🗑', label: 'Delete',      danger: true, fn: function() { activateTab(name); deleteScript(name); } },
+    { icon: SVG.pencil, label: 'Rename…',      fn: function() { activateTab(name); renameScript(name); } },
+    { icon: SVG.trash,  label: 'Delete',        danger: true, fn: function() { activateTab(name); deleteScript(name); } },
   ], x, y);
 }
 
@@ -780,8 +815,8 @@ function showDiagnostics(diags) {
   var sd = el('sb-diags');
   if (sd) {
     if (errors > 0 || warnings > 0) {
-      sd.textContent = (errors > 0 ? '✗ ' + errors : '')
-        + (warnings > 0 ? (errors > 0 ? '  ⚠ ' : '⚠ ') + warnings : '');
+      sd.innerHTML = (errors > 0 ? SVG.error + ' ' + errors : '')
+        + (warnings > 0 ? (errors > 0 ? '  ' + SVG.warning + ' ' : SVG.warning + ' ') + warnings : '');
       sd.style.display = '';
     } else { sd.style.display = 'none'; }
   }
@@ -793,7 +828,7 @@ function showDiagnostics(diags) {
     probEl.innerHTML = '<span class="empty-msg">No problems detected.</span>';
     return;
   }
-  var sevIcon = { ERROR:'✗', WARNING:'⚠', INFO:'·', UNREACHABLE:'~' };
+  var sevIcon = { ERROR: SVG.error, WARNING: SVG.warning, INFO:'·', UNREACHABLE:'~' };
   var sevCls  = { ERROR:'E', WARNING:'W', INFO:'I', UNREACHABLE:'U' };
   probEl.innerHTML = all.map(function(d) {
     return '<div class="diag-item" onclick="jumpTo(' + d.line + ',' + d.col + ')">'
@@ -896,7 +931,7 @@ function updateStatusBar() {
   var bar      = el('status-bar');
 
   if (playerEl) {
-    if (S.player) { playerEl.textContent = '👤 ' + S.player; playerEl.style.display = ''; }
+    if (S.player) { playerEl.innerHTML = SVG.user + ' ' + esc(S.player); playerEl.style.display = ''; }
     else playerEl.style.display = 'none';
   }
   if (scriptEl) scriptEl.textContent = S.activeTab ? S.activeTab + '.loom' : 'Loom Editor';
@@ -950,10 +985,12 @@ function initKeyboard() {
     if (ctrl && ev.key === 'k')     { ev.preventDefault(); openCommandPalette(); }
     if (ctrl && ev.key === 'b')     { ev.preventDefault(); toggleSidebar(); }
     if (ctrl && ev.key === 'n')     { ev.preventDefault(); newScript(); }
+    if (ctrl && ev.key === ',')     { ev.preventDefault(); openSettings(); }
     if (ctrl && ev.key === 'Enter') { ev.preventDefault(); runScript(); }
     if (ctrl && ev.shiftKey && ev.key === 'R') { ev.preventDefault(); reloadScript(); }
     if (ev.key === 'Escape') {
       ctxMenu.hide();
+      closeSettings();
       var overlay = el('cmd-overlay');
       if (overlay && overlay.classList.contains('open')) { ev.preventDefault(); closeCommandPalette(); }
     }
@@ -1011,11 +1048,216 @@ function initContextMenus() {
   }
 }
 
+// ── Settings ──────────────────────────────────────────────────────
+var SETTINGS_SCHEMA = {
+  editor: { label: 'Editor', items: [
+    { key:'fontSize',             label:'Font Size',            desc:'Editor font size in pixels',        type:'range',  min:10, max:26,   step:1 },
+    { key:'fontFamily',           label:'Font Family',          desc:'Editor font family',                 type:'text' },
+    { key:'tabSize',              label:'Tab Size',             desc:'Number of spaces per tab stop',      type:'range',  min:1,  max:8,    step:1 },
+    { key:'wordWrap',             label:'Word Wrap',            desc:'Line wrap mode',                     type:'select', options:['off','on','wordWrapColumn','bounded'] },
+    { key:'minimap',              label:'Minimap',              desc:'Show the minimap scrollbar',         type:'toggle' },
+    { key:'lineNumbers',          label:'Line Numbers',         desc:'Gutter line numbers',                type:'select', options:['on','off','relative'] },
+    { key:'renderWhitespace',     label:'Render Whitespace',    desc:'Show whitespace characters',         type:'select', options:['selection','none','boundary','all'] },
+    { key:'smoothScrolling',      label:'Smooth Scrolling',     desc:'Animate editor scrolling',           type:'toggle' },
+    { key:'scrollBeyondLastLine', label:'Scroll Past End',      desc:'Allow scrolling past the last line', type:'toggle' },
+    { key:'cursorStyle',          label:'Cursor Style',         desc:'Cursor shape in the editor',         type:'select', options:['line','block','underline','line-thin','block-outline','underline-thin'] },
+    { key:'cursorBlinking',       label:'Cursor Blinking',      desc:'Cursor blink animation style',       type:'select', options:['smooth','blink','phase','expand','solid'] },
+    { key:'bracketPairColorization', label:'Bracket Colorization', desc:'Colorize matching bracket pairs', type:'toggle' },
+  ]},
+  interface: { label: 'Interface', items: [
+    { key:'accentColor',   label:'Accent Color',  desc:'Theme highlight and active-item color', type:'color' },
+    { key:'uiFontSize',    label:'UI Font Size',  desc:'Interface font size in pixels',         type:'range', min:10, max:18, step:1 },
+    { key:'showStatusBar', label:'Status Bar',    desc:'Show the bottom status bar',            type:'toggle' },
+  ]},
+  behavior: { label: 'Behavior', items: [
+    { key:'autoValidate',  label:'Auto Validate',    desc:'Validate script as you type',           type:'toggle' },
+    { key:'validateDelay', label:'Validate Delay',   desc:'Milliseconds before auto-validate runs', type:'range', min:200, max:2000, step:100 },
+    { key:'confirmClose',  label:'Confirm on Close', desc:'Ask before closing a tab with unsaved changes', type:'toggle' },
+  ]},
+  git: { label: 'Git', items: [
+    { key:'commitMsgTemplate', label:'Commit Message', desc:'Default commit message — {name} is replaced with the script name', type:'text' },
+  ]},
+};
+
+function loadSettings() {
+  try {
+    var stored = localStorage.getItem('loom_settings');
+    CFG = stored ? Object.assign({}, DEFAULTS, JSON.parse(stored)) : Object.assign({}, DEFAULTS);
+  } catch(_) { CFG = Object.assign({}, DEFAULTS); }
+}
+
+function saveSettings() {
+  localStorage.setItem('loom_settings', JSON.stringify(CFG));
+  _flashSaved();
+}
+
+function applySettings() {
+  if (editor) {
+    editor.updateOptions({
+      fontSize: CFG.fontSize, fontFamily: CFG.fontFamily,
+      tabSize: CFG.tabSize, wordWrap: CFG.wordWrap,
+      minimap: { enabled: CFG.minimap }, lineNumbers: CFG.lineNumbers,
+      renderWhitespace: CFG.renderWhitespace, smoothScrolling: CFG.smoothScrolling,
+      scrollBeyondLastLine: CFG.scrollBeyondLastLine,
+      cursorStyle: CFG.cursorStyle, cursorBlinking: CFG.cursorBlinking,
+      bracketPairColorization: { enabled: CFG.bracketPairColorization },
+    });
+  }
+  var hex = CFG.accentColor || '#5b8af0';
+  if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
+    var r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    document.documentElement.style.setProperty('--accent', hex);
+    document.documentElement.style.setProperty('--accent-dim',  'rgba('+r+','+g+','+b+',0.13)');
+    document.documentElement.style.setProperty('--accent-glow', 'rgba('+r+','+g+','+b+',0.35)');
+  }
+  document.body.style.fontSize = CFG.uiFontSize + 'px';
+  var sb = el('status-bar');
+  if (sb) sb.style.display = CFG.showStatusBar ? '' : 'none';
+}
+
+function openSettings() {
+  loadSettings();
+  var ov = el('settings-overlay');
+  if (!ov) return;
+  ov.classList.add('open');
+  var activeCat = (document.querySelector('.snav-item.active') || {}).dataset;
+  showSettingsCat((activeCat && activeCat.cat) || 'editor');
+}
+
+function closeSettings() {
+  var ov = el('settings-overlay');
+  if (ov) ov.classList.remove('open');
+}
+
+function showSettingsCat(cat) {
+  document.querySelectorAll('.snav-item').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.cat === cat);
+  });
+  _renderSettingsCat(cat);
+}
+
+function _renderSettingsCat(cat) {
+  var schema = SETTINGS_SCHEMA[cat];
+  if (!schema) return;
+  var content = el('settings-content');
+  if (!content) return;
+  content.innerHTML = schema.items.map(function(item) {
+    return _renderSettingItem(item);
+  }).join('');
+  schema.items.forEach(function(item) { _bindSettingItem(item); });
+}
+
+function _renderSettingItem(item) {
+  var val = CFG[item.key];
+  var ctrl = '';
+  if (item.type === 'toggle') {
+    ctrl = '<label class="s-toggle"><input type="checkbox" data-key="' + item.key + '"' + (val ? ' checked' : '') + '>'
+         + '<span class="s-track"><span class="s-thumb"></span></span></label>';
+  } else if (item.type === 'range') {
+    ctrl = '<div class="s-range">'
+         + '<input type="range" data-key="' + item.key + '" min="' + item.min + '" max="' + item.max + '" step="' + item.step + '" value="' + val + '">'
+         + '<span class="s-range-val" id="rv-' + item.key + '">' + val + '</span></div>';
+  } else if (item.type === 'select') {
+    ctrl = '<select class="s-select" data-key="' + item.key + '">'
+         + item.options.map(function(o) {
+             return '<option value="' + esc(o) + '"' + (o === val ? ' selected' : '') + '>' + esc(o) + '</option>';
+           }).join('') + '</select>';
+  } else if (item.type === 'color') {
+    ctrl = '<div class="s-color">'
+         + '<input type="color" data-key="' + item.key + '" value="' + esc(val) + '">'
+         + '<input class="s-color-hex" data-key-hex="' + item.key + '" value="' + esc(val) + '" maxlength="7" spellcheck="false"></div>';
+  } else if (item.type === 'text') {
+    ctrl = '<input class="s-text-input" data-key="' + item.key + '" value="' + esc(String(val)) + '" spellcheck="false">';
+  }
+  return '<div class="s-item">'
+    + '<div class="s-item-info"><div class="s-label">' + esc(item.label) + '</div>'
+    + (item.desc ? '<div class="s-desc">' + esc(item.desc) + '</div>' : '')
+    + '</div><div class="s-ctrl">' + ctrl + '</div></div>';
+}
+
+function _bindSettingItem(item) {
+  var content = el('settings-content');
+  if (!content) return;
+  if (item.type === 'toggle') {
+    var cb = content.querySelector('input[type=checkbox][data-key="' + item.key + '"]');
+    if (cb) cb.addEventListener('change', function() {
+      CFG[item.key] = this.checked; saveSettings(); applySettings();
+    });
+  } else if (item.type === 'range') {
+    var range = content.querySelector('input[type=range][data-key="' + item.key + '"]');
+    var valEl = el('rv-' + item.key);
+    if (range) range.addEventListener('input', function() {
+      CFG[item.key] = parseFloat(this.value);
+      if (valEl) valEl.textContent = this.value;
+      saveSettings(); applySettings();
+    });
+  } else if (item.type === 'select') {
+    var sel = content.querySelector('select[data-key="' + item.key + '"]');
+    if (sel) sel.addEventListener('change', function() {
+      CFG[item.key] = this.value; saveSettings(); applySettings();
+    });
+  } else if (item.type === 'color') {
+    var cp  = content.querySelector('input[type=color][data-key="' + item.key + '"]');
+    var hex = content.querySelector('input[data-key-hex="' + item.key + '"]');
+    if (cp) cp.addEventListener('input', function() {
+      CFG[item.key] = this.value;
+      if (hex) hex.value = this.value;
+      saveSettings(); applySettings();
+    });
+    if (hex) hex.addEventListener('change', function() {
+      var v = this.value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+        CFG[item.key] = v;
+        if (cp) cp.value = v;
+        saveSettings(); applySettings();
+      } else { this.value = CFG[item.key]; }
+    });
+  } else if (item.type === 'text') {
+    var txt = content.querySelector('input.s-text-input[data-key="' + item.key + '"]');
+    if (txt) txt.addEventListener('change', function() {
+      CFG[item.key] = this.value; saveSettings(); applySettings();
+    });
+  }
+}
+
+function initSettingsEvents() {
+  var overlay = el('settings-overlay');
+  if (!overlay) return;
+  overlay.addEventListener('mousedown', function(ev) {
+    if (ev.target === overlay) closeSettings();
+  });
+  var closeBtn = el('settings-close');
+  if (closeBtn) closeBtn.addEventListener('click', closeSettings);
+  var resetBtn = el('settings-reset');
+  if (resetBtn) resetBtn.addEventListener('click', resetSettings);
+  document.querySelectorAll('.snav-item').forEach(function(b) {
+    b.addEventListener('click', function() { showSettingsCat(this.dataset.cat); });
+  });
+}
+
+function resetSettings() {
+  CFG = Object.assign({}, DEFAULTS);
+  saveSettings(); applySettings();
+  var active = document.querySelector('.snav-item.active');
+  _renderSettingsCat(active ? active.dataset.cat : 'editor');
+}
+
+function _flashSaved() {
+  var badge = el('settings-saved-badge');
+  if (!badge) return;
+  badge.classList.add('visible');
+  clearTimeout(_flashSaved._t);
+  _flashSaved._t = setTimeout(function() { badge.classList.remove('visible'); }, 2000);
+}
+
 // ── Boot ───────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', function() {
+  loadSettings();
+  applySettings();
   initKeyboard();
   initResize();
   initContextMenus();
+  initSettingsEvents();
   showBottomTab('problems');
   initAuth();
 });
