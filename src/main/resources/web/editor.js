@@ -39,6 +39,53 @@ let currentScript = null;
 let diagnosticDecorations = [];
 let validateTimeout = null;
 
+// ── Modal dialogs ─────────────────────────────────────────────────
+function showDialog({ message, input = false, defaultValue = '', okLabel = 'OK', dangerOk = false }) {
+  return new Promise(resolve => {
+    const overlay  = document.getElementById('modal-overlay');
+    const msgEl    = document.getElementById('modal-message');
+    const inputEl  = document.getElementById('modal-input');
+    const okBtn    = document.getElementById('modal-ok');
+    const cancelBtn = document.getElementById('modal-cancel');
+
+    msgEl.textContent  = message;
+    okBtn.textContent  = okLabel;
+    okBtn.className    = 'btn ' + (dangerOk ? 'btn-danger' : 'btn-primary');
+
+    inputEl.style.display = input ? '' : 'none';
+    if (input) { inputEl.value = defaultValue; }
+
+    overlay.classList.add('open');
+    if (input) setTimeout(() => { inputEl.focus(); inputEl.select(); }, 30);
+
+    function cleanup(result) {
+      overlay.classList.remove('open');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      document.removeEventListener('keydown', onKey);
+      overlay.removeEventListener('mousedown', onBdClick);
+      resolve(result);
+    }
+    function onOk()    { cleanup(input ? inputEl.value : true); }
+    function onCancel(){ cleanup(input ? null : false); }
+    function onKey(e)  { if (e.key === 'Enter') onOk(); else if (e.key === 'Escape') onCancel(); }
+    function onBdClick(e) { if (e.target === overlay) onCancel(); }
+
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('mousedown', onBdClick);
+  });
+}
+
+function showPrompt(message, defaultValue = '') {
+  return showDialog({ message, input: true, defaultValue });
+}
+
+function showConfirm(message, dangerOk = false) {
+  return showDialog({ message, okLabel: dangerOk ? 'Delete' : 'Confirm', dangerOk });
+}
+
 // ── Auth ──────────────────────────────────────────────────────────
 async function initAuth() {
   const stored = sessionStorage.getItem('loom_session');
@@ -112,6 +159,9 @@ function initEditor() {
       renderWhitespace: 'selection',
       bracketPairColorization: { enabled: true },
       suggest: { showKeywords: true },
+      cursorStyle: 'line',
+      cursorBlinking: 'smooth',
+      cursorSmoothCaretAnimation: 'on',
     });
 
     // Register completion provider
@@ -210,7 +260,7 @@ async function openScript(name) {
 async function saveScript() {
   if (!currentScript || !editor) return;
   const source = editor.getValue();
-  const msg = prompt('Commit message (leave blank for auto):', '') ?? '';
+  const msg = await showPrompt('Commit message (leave blank for auto):') ?? '';
   try {
     await API.post('/scripts/' + currentScript, {
       source,
@@ -248,7 +298,7 @@ async function validateScript() {
 
 async function deleteScript() {
   if (!currentScript) return;
-  if (!confirm(`Delete ${currentScript}.loom? This cannot be undone.`)) return;
+  if (!await showConfirm(`Delete ${currentScript}.loom? This cannot be undone.`, true)) return;
   try {
     await API.delete('/scripts/' + currentScript);
     currentScript = null;
@@ -259,7 +309,7 @@ async function deleteScript() {
 }
 
 async function newScript() {
-  const name = prompt('Script name (alphanumeric, underscores, hyphens):');
+  const name = await showPrompt('Script name (alphanumeric, underscores, hyphens):');
   if (!name) return;
   try {
     await API.put('/scripts/' + name, { source: defaultSource(name) });
@@ -334,7 +384,7 @@ async function loadGitLog(name) {
 async function showCommit(hash, name) {
   try {
     const data = await API.get(`/git/${name}/show/${hash}`);
-    if (confirm(`Restore to commit ${hash.slice(0,7)}? Current unsaved changes will be overwritten in the editor.`)) {
+    if (await showConfirm(`Restore to commit ${hash.slice(0,7)}? Current unsaved changes will be overwritten in the editor.`)) {
       if (editor) editor.setValue(data.source);
       appendOutput(`Loaded version ${hash.slice(0,7)} into editor. Save to persist.`);
     }
