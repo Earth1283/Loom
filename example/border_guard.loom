@@ -1,0 +1,19 @@
+script "BorderGuard" {
+  var BORDER   = 500.0
+  var WARN_AT  = 460.0
+
+  on PlayerMove(player, fromX, fromY, fromZ, toX, toY, toZ) {
+    var dist = max(abs(toX), abs(toZ))
+
+    if (dist >= BORDER) {
+      player.teleport(player.world, 0, 64, 0)
+      player.message("§cSent back to spawn — the world border is ±" + str(BORDER) + " blocks.")
+      return
+    }
+
+    if (dist >= WARN_AT) {
+      var remaining = floor(BORDER - dist)
+      player.actionBar("§e⚠ Approaching world border — §f" + str(remaining) + "§e blocks remaining")
+    }
+  }
+}

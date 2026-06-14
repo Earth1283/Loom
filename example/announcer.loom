@@ -1,0 +1,15 @@
+script "Announcer" {
+  var messages = [
+    "§eVote for us at §fvote.example.com §eto help the server grow!",
+    "§bJoin our Discord community at §fdiscord.gg/example",
+    "§aUse §f/rules §ato read the server rules before playing.",
+    "§dFound a bug? Open a ticket in our Discord.",
+    "§6Enjoying the server? Leave a review on our forum!",
+  ]
+  var index = 0
+
+  every 10 minutes {
+    broadcast("§8[§6Announcement§8] §r" + messages[index])
+    index = (index + 1) % len(messages)
+  }
+}

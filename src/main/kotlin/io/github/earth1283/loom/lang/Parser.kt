@@ -85,8 +85,7 @@ class Parser(private val tokens: List<Token>) {
     private fun commandDecl(): Stmt.CommandDecl {
         val tok = consume(TokenType.COMMAND, "Expected 'command'")
         val name = consume(TokenType.STRING_PART, "Expected command name string").lexeme
-        consume(TokenType.LPAREN, "Expected '('")
-        val params = paramList()
+        val params = if (check(TokenType.LPAREN)) { advance(); paramList() } else emptyList()
         consume(TokenType.LBRACE, "Expected '{'")
         val body = block()
         return Stmt.CommandDecl(name, params, body, tok.line, tok.col)

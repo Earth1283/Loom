@@ -1,0 +1,21 @@
+script "DeathCounter" {
+  var deaths = {}
+
+  on PlayerDeath(player) {
+    var name = player.name
+    if (!contains(deaths, name)) { deaths[name] = 0 }
+    deaths[name] = deaths[name] + 1
+    var d = deaths[name]
+
+    player.actionBar("§cDeaths this session: §f" + str(d))
+
+    if (d == 5)  { broadcast("§c" + name + " has died 5 times. Rough session!") }
+    if (d == 10) { broadcast("§4" + name + " has died 10 times. This is fine.") }
+    if (d == 25) { broadcast("§4§l" + name + " §r§4has died §l25§r§4 times. Are they okay?") }
+  }
+
+  on PlayerQuit(player) {
+    // Reset counter when a player leaves so each session starts fresh.
+    deaths[player.name] = 0
+  }
+}

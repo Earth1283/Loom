@@ -1,0 +1,21 @@
+script "WelcomeKit" {
+  // Tracks which players have already received the kit so relogging doesn't re-gift.
+  var welcomed = {}
+
+  on PlayerJoin(player) {
+    if (contains(welcomed, player.name)) {
+      return
+    }
+    welcomed[player.name] = true
+
+    // Wait 2 seconds for the inventory to finish loading before giving items.
+    after 2 seconds {
+      player.title("§aWelcome!", "§7Enjoy your stay, §f" + player.name)
+      player.give(Item.STONE_SWORD, 1)
+      player.give(Item.BREAD, 8)
+      player.give(Item.TORCH, 16)
+      player.give(Item.OAK_PLANKS, 32)
+      player.message("§aYou received a starter kit. Good luck!")
+    }
+  }
+}

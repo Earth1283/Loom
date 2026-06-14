@@ -1,0 +1,30 @@
+script "AFKChecker" {
+  // Ticks since each player last moved. Resets on any block-level movement.
+  var idleTicks = {}
+  var AFK_THRESHOLD = 6000   // 5 minutes at 20 tps
+
+  on PlayerMove(player, fromX, fromY, fromZ, toX, toY, toZ) {
+    idleTicks[player.name] = 0
+  }
+
+  on PlayerQuit(player) {
+    remove(idleTicks, player.name)
+  }
+
+  every 20 ticks {
+    for (p in players()) {
+      var name = p.name
+      if (!contains(idleTicks, name)) { idleTicks[name] = 0 }
+      idleTicks[name] = idleTicks[name] + 20
+
+      var t = idleTicks[name]
+      if (t == AFK_THRESHOLD) {
+        broadcast("§7" + name + " is now AFK.")
+      }
+      if (t > AFK_THRESHOLD) {
+        var minsLeft = ceil((t - AFK_THRESHOLD) / 1200.0)
+        p.actionBar("§7[AFK] Move to resume.")
+      }
+    }
+  }
+}
