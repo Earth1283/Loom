@@ -14,8 +14,10 @@ import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import io.ktor.http.*
 import io.ktor.server.request.*
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import org.bukkit.plugin.Plugin
+import java.util.concurrent.ConcurrentHashMap
 import java.util.logging.Logger
 import kotlin.time.Duration.Companion.seconds
 
@@ -27,6 +29,8 @@ class WebServer(
     private val logger: Logger
 ) {
     private var server: EmbeddedServer<*, *>? = null
+    private val activeSessions: MutableSet<DefaultWebSocketSession> =
+        ConcurrentHashMap.newKeySet()
 
     fun start() {
         server = embeddedServer(Netty, port = config.webPort, host = config.webHost) {
@@ -229,7 +233,12 @@ class WebServer(
                         close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Unauthorized"))
                         return@webSocket
                     }
-                    LoomLanguageServer(scripts, this).handle()
+                    activeSessions.add(this)
+                    try {
+                        LoomLanguageServer(scripts, this).handle()
+                    } finally {
+                        activeSessions.remove(this)
+                    }
                 }
 
                 // Serve the Monaco editor SPA
@@ -252,6 +261,14 @@ class WebServer(
     }
 
     fun stop() {
+        // Close WebSocket sessions before stopping Netty to avoid RejectedExecutionException
+        // from coroutine continuations dispatching onto a terminated event loop.
+        runBlocking {
+            activeSessions.toList().forEach { session ->
+                runCatching { session.close(CloseReason(CloseReason.Codes.GOING_AWAY, "Server shutting down")) }
+            }
+        }
+        activeSessions.clear()
         server?.stop(1000, 2000)
         server = null
     }
