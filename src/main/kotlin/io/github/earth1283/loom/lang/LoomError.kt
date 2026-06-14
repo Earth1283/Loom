@@ -1,5 +1,7 @@
 package io.github.earth1283.loom.lang
 
+import kotlinx.serialization.Serializable
+
 sealed class LoomError(message: String) : Exception(message) {
     class Lexer(val line: Int, val col: Int, msg: String) :
         LoomError("[$line:$col] Lexer error: $msg")
@@ -15,6 +17,7 @@ sealed class LoomError(message: String) : Exception(message) {
     class Continue : LoomError("continue")
 }
 
+@Serializable
 data class Diagnostic(
     val line: Int,
     val col: Int,
@@ -23,6 +26,7 @@ data class Diagnostic(
     val message: String,
     val severity: Severity
 ) {
+    @Serializable
     enum class Severity { ERROR, WARNING, INFO }
 }
 
