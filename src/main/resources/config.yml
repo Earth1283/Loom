@@ -1,0 +1,38 @@
+# ┌─────────────────────────────────────────────────────────────────┐
+# │                     Loom Configuration                          │
+# └─────────────────────────────────────────────────────────────────┘
+
+# Web editor settings
+web:
+  # Enable the built-in Monaco web editor
+  enabled: true
+  # Host to bind to. Use 0.0.0.0 to expose on all interfaces,
+  # or 127.0.0.1 to restrict to localhost (e.g. behind a reverse proxy)
+  host: "0.0.0.0"
+  # Port the editor is served on
+  port: 7070
+
+# Script execution settings
+scripts:
+  # Automatically load all .loom files in the scripts/ directory on startup
+  auto-load: true
+  # Maximum script execution timeout in milliseconds (per-call)
+  timeout-ms: 5000
+  # Maximum number of scripts that can be loaded simultaneously
+  max-scripts: 100
+
+# Git / version control settings
+git:
+  # Automatically commit script changes when saved from the editor
+  auto-commit: true
+  # Commit message template. {script} is replaced with the script name.
+  auto-commit-message: "Auto-save {script}"
+
+# Security settings
+security:
+  # Restrict /loom and the web editor to server operators only
+  ops-only: true
+
+# Miscellaneous
+# Enable extra debug logging (performance impact — use only when diagnosing issues)
+debug: false
