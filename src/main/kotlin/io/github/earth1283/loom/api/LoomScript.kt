@@ -23,8 +23,8 @@ class LoomScript(
     fun validate(): List<Diagnostic> {
         return try {
             val tokens = Lexer(source).tokenize()
-            Parser(tokens).parse()
-            emptyList()
+            val ast = Parser(tokens).parse()
+            StaticAnalyzer().analyze(ast)
         } catch (e: LoomError) {
             listOf(e.toDiagnostic() ?: return emptyList())
         }
@@ -32,6 +32,12 @@ class LoomScript(
 
     fun load(): List<Diagnostic> {
         unload()
+        val staticDiags: List<Diagnostic> = try {
+            val tokens = Lexer(source).tokenize()
+            val ast = Parser(tokens).parse()
+            StaticAnalyzer().analyze(ast)
+        } catch (_: LoomError) { emptyList() }
+
         return try {
             val tokens = Lexer(source).tokenize()
             val ast = Parser(tokens).parse()
@@ -54,11 +60,12 @@ class LoomScript(
             interpreter = interp
             state = State.RUNNING
             lastError = null
-            emptyList()
+            staticDiags
         } catch (e: LoomError) {
             state = State.ERROR
             lastError = e.message
-            listOf(e.toDiagnostic() ?: return emptyList())
+            val runtimeDiag = e.toDiagnostic()
+            if (runtimeDiag != null) staticDiags + runtimeDiag else staticDiags
         }
     }
 

@@ -322,6 +322,14 @@ class WebServer(
     .commit-meta { color: #888; font-size: 11px; }
     #filename-display { color: #d4d4d4; font-weight: 600; flex: 1; }
     input[type=text] { background: #3c3c3c; border: 1px solid #555; color: #d4d4d4; padding: 4px 8px; border-radius: 3px; font-size: 12px; }
+    #modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 200; opacity: 0; pointer-events: none; transition: opacity 0.15s ease; }
+    #modal-overlay.open { opacity: 1; pointer-events: all; }
+    #modal-box { background: #252526; border: 1px solid #3c3c3c; border-radius: 8px; padding: 24px 28px; min-width: 320px; max-width: 460px; width: 90%; display: flex; flex-direction: column; gap: 14px; transform: translateY(-10px) scale(0.97); opacity: 0; transition: transform 0.15s ease, opacity 0.15s ease; }
+    #modal-overlay.open #modal-box { transform: translateY(0) scale(1); opacity: 1; }
+    #modal-message { font-size: 13px; color: #d4d4d4; line-height: 1.5; }
+    #modal-input { width: 100%; background: #3c3c3c; border: 1px solid #555; color: #d4d4d4; padding: 6px 10px; border-radius: 3px; font-size: 13px; outline: none; }
+    #modal-input:focus { border-color: #007acc; }
+    #modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -331,6 +339,17 @@ class WebServer(
       <div id="auth-instruction">Connecting to server...</div>
       <div id="auth-code"></div>
       <div id="auth-waiting" style="color:#888; font-size:12px;"></div>
+    </div>
+  </div>
+
+  <div id="modal-overlay">
+    <div id="modal-box">
+      <div id="modal-message"></div>
+      <input id="modal-input" type="text" autocomplete="off">
+      <div id="modal-actions">
+        <button id="modal-cancel" class="btn btn-secondary">Cancel</button>
+        <button id="modal-ok" class="btn btn-primary">OK</button>
+      </div>
     </div>
   </div>
 

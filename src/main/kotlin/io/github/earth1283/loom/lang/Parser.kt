@@ -55,6 +55,10 @@ class Parser(private val tokens: List<Token>) {
     // --- Statements ---
 
     private fun statement(): Stmt = when {
+        check(TokenType.ELSE) -> {
+            val t = advance()
+            throw LoomError.Parser(t.line, t.col, "'else' without a matching 'if'")
+        }
         check(TokenType.ON) -> onEvent()
         check(TokenType.COMMAND) -> commandDecl()
         check(TokenType.EVERY) -> everySchedule()
