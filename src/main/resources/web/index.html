@@ -560,6 +560,39 @@
     }
     #modal-input:focus { border-color: var(--accent); }
     #modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* ── Context menu ───────────────────────────────────────── */
+    #ctx-menu {
+      position: fixed; z-index: 650;
+      background: var(--surface-2);
+      border: 1px solid var(--border-hi);
+      border-radius: var(--r);
+      padding: 4px 0; min-width: 185px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      display: none;
+      animation: ctxIn 0.08s ease;
+      transform-origin: top left;
+    }
+    @keyframes ctxIn {
+      from { opacity: 0; transform: scale(0.94); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    .ctx-item {
+      display: flex; align-items: center; gap: 9px;
+      padding: 6px 14px;
+      cursor: pointer; font-size: 12.5px;
+      color: var(--text-1);
+      transition: background var(--t);
+      user-select: none; white-space: nowrap;
+    }
+    .ctx-item:hover { background: var(--accent-dim); }
+    .ctx-item.ctx-danger { color: var(--error); }
+    .ctx-item.ctx-danger:hover { background: rgba(255,77,106,0.12); }
+    .ctx-item.ctx-disabled { color: var(--text-3); cursor: default; pointer-events: none; }
+    .ctx-icon { font-size: 12px; width: 15px; text-align: center; flex-shrink: 0; opacity: 0.8; }
+    .ctx-label { flex: 1; }
+    .ctx-key { margin-left: 20px; color: var(--text-3); font-family: var(--font-mono); font-size: 11px; }
+    .ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
   </style>
 </head>
 <body>

@@ -41,6 +41,50 @@ let unreachDecs    = null;
 const editorModels = {};   // { name: ITextModel }
 const pendingOpens = new Set(); // guard against concurrent openTab calls for same name
 
+// ── Context menu ──────────────────────────────────────────────────
+const ctxMenu = (function() {
+  var el = null, _dismiss = null;
+  function _el() {
+    if (!el) { el = document.createElement('div'); el.id = 'ctx-menu'; document.body.appendChild(el); }
+    return el;
+  }
+  function show(items, x, y) {
+    var m = _el();
+    m.innerHTML = items.map(function(item, i) {
+      if (item === null) return '<div class="ctx-sep"></div>';
+      var cls = 'ctx-item' + (item.danger ? ' ctx-danger' : '') + (item.disabled ? ' ctx-disabled' : '');
+      return '<div class="' + cls + '" data-idx="' + i + '">'
+        + '<span class="ctx-icon">' + (item.icon || '') + '</span>'
+        + '<span class="ctx-label">' + esc(item.label) + '</span>'
+        + (item.key ? '<span class="ctx-key">' + esc(item.key) + '</span>' : '')
+        + '</div>';
+    }).join('');
+    m.style.display = 'block';
+    m.style.left = x + 'px';
+    m.style.top  = y + 'px';
+    requestAnimationFrame(function() {
+      var r = m.getBoundingClientRect();
+      if (r.right  > window.innerWidth  - 6) m.style.left = (x - r.width)  + 'px';
+      if (r.bottom > window.innerHeight - 6) m.style.top  = (y - r.height) + 'px';
+    });
+    m.onclick = function(ev) {
+      var it = ev.target.closest('.ctx-item');
+      if (!it || it.classList.contains('ctx-disabled')) return;
+      var idx = parseInt(it.dataset.idx, 10);
+      hide();
+      if (items[idx] && items[idx].fn) items[idx].fn();
+    };
+    if (_dismiss) document.removeEventListener('mousedown', _dismiss, true);
+    _dismiss = function(ev) { if (!m.contains(ev.target)) hide(); };
+    setTimeout(function() { document.addEventListener('mousedown', _dismiss, true); }, 0);
+  }
+  function hide() {
+    if (el) el.style.display = 'none';
+    if (_dismiss) { document.removeEventListener('mousedown', _dismiss, true); _dismiss = null; }
+  }
+  return { show: show, hide: hide };
+}());
+
 // ── Utils ─────────────────────────────────────────────────────────
 function esc(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function escJ(s) { return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
@@ -441,6 +485,14 @@ function initEditor() {
         return { actions:actions, dispose:function(){} };
       }
     });
+
+    // Loom actions in the Monaco right-click context menu
+    editor.addAction({ id:'loom.save',     label:'Loom: Save & Commit',  contextMenuGroupId:'loom', contextMenuOrder:1, run: function() { saveScript(); } });
+    editor.addAction({ id:'loom.load',     label:'Loom: Load Script',    contextMenuGroupId:'loom', contextMenuOrder:2, run: function() { runScript(); } });
+    editor.addAction({ id:'loom.unload',   label:'Loom: Unload Script',  contextMenuGroupId:'loom', contextMenuOrder:3, run: function() { stopScript(); } });
+    editor.addAction({ id:'loom.reload',   label:'Loom: Reload Script',  contextMenuGroupId:'loom', contextMenuOrder:4, run: function() { reloadScript(); } });
+    editor.addAction({ id:'loom.validate', label:'Loom: Validate',       contextMenuGroupId:'loom', contextMenuOrder:5, run: function() { validateScript(); } });
+    editor.addAction({ id:'loom.rename',   label:'Loom: Rename Script…', contextMenuGroupId:'loom', contextMenuOrder:6, run: function() { renameScript(); } });
   });
 }
 
@@ -539,9 +591,9 @@ async function saveScript() {
   } catch (err) { toast('Save failed: ' + err.message, 'e'); }
 }
 
-async function runScript() {
-  if (!S.activeTab) { toast('No script open.', 'w'); return; }
-  var name = S.activeTab;
+async function runScript(nameArg) {
+  var name = nameArg || S.activeTab;
+  if (!name) { toast('No script open.', 'w'); return; }
   try {
     var res = await API.post('/scripts/' + name + '/load', {});
     S.scriptStates[name] = res.state;
@@ -553,9 +605,9 @@ async function runScript() {
   } catch (err) { toast('Load failed: ' + err.message, 'e'); }
 }
 
-async function stopScript() {
-  if (!S.activeTab) { toast('No script open.', 'w'); return; }
-  var name = S.activeTab;
+async function stopScript(nameArg) {
+  var name = nameArg || S.activeTab;
+  if (!name) { toast('No script open.', 'w'); return; }
   try {
     await API.post('/scripts/' + name + '/unload', {});
     S.scriptStates[name] = 'UNLOADED';
@@ -565,9 +617,9 @@ async function stopScript() {
   } catch (err) { toast('Unload failed: ' + err.message, 'e'); }
 }
 
-async function reloadScript() {
-  if (!S.activeTab) { toast('No script open.', 'w'); return; }
-  var name = S.activeTab;
+async function reloadScript(nameArg) {
+  var name = nameArg || S.activeTab;
+  if (!name) { toast('No script open.', 'w'); return; }
   try {
     var res = await API.post('/scripts/' + name + '/reload', {});
     S.scriptStates[name] = res.state;
@@ -587,9 +639,9 @@ async function validateScript() {
   showBottomTab('problems');
 }
 
-async function deleteScript() {
-  if (!S.activeTab) { toast('No script open.', 'w'); return; }
-  var name = S.activeTab;
+async function deleteScript(nameArg) {
+  var name = nameArg || S.activeTab;
+  if (!name) { toast('No script selected.', 'w'); return; }
   if (!await showConfirm('Delete ' + name + '.loom permanently? This cannot be undone.', true, 'Delete Script')) return;
   try {
     await API.del('/scripts/' + name);
@@ -600,9 +652,9 @@ async function deleteScript() {
   } catch (err) { toast('Delete failed: ' + err.message, 'e'); }
 }
 
-async function renameScript() {
-  if (!S.activeTab) { toast('No script open.', 'w'); return; }
-  var oldName = S.activeTab;
+async function renameScript(nameArg) {
+  var oldName = nameArg || S.activeTab;
+  if (!oldName) { toast('No script selected.', 'w'); return; }
   var newName = await showPrompt('New name for ' + oldName + ':', oldName, 'Rename Script');
   if (!newName || newName === oldName) return;
   try {
@@ -636,6 +688,36 @@ async function quickStop(name, ev) {
     toast(name + ' unloaded', 'i');
     renderScriptList(); renderTabs(); updateStatusBar();
   } catch (err) { toast(err.message, 'e'); }
+}
+
+// ── Context menu builders ──────────────────────────────────────────
+function showScriptCtxMenu(name, x, y) {
+  var state  = S.scriptStates[name] || 'UNLOADED';
+  var loaded = state !== 'UNLOADED';
+  ctxMenu.show([
+    { icon: '↗', label: 'Open',      fn: function() { openTab(name); } },
+    null,
+    { icon: '▶', label: 'Load',      fn: function() { runScript(name); } },
+    { icon: '■', label: 'Unload',    disabled: !loaded, fn: function() { stopScript(name); } },
+    { icon: '↺', label: 'Reload',    disabled: !loaded, fn: function() { reloadScript(name); } },
+    null,
+    { icon: '✏', label: 'Rename…',   fn: function() { renameScript(name); } },
+    { icon: '⧉', label: 'Copy Name', fn: function() { navigator.clipboard.writeText(name).catch(function(){}); toast('Copied', 's', 1500); } },
+    null,
+    { icon: '🗑', label: 'Delete',   danger: true, fn: function() { deleteScript(name); } },
+  ], x, y);
+}
+
+function showTabCtxMenu(name, x, y) {
+  var others = S.tabs.filter(function(t) { return t.name !== name; });
+  ctxMenu.show([
+    { icon: '✕', label: 'Close Tab',    key: 'Alt+W', fn: function() { closeTab(name); } },
+    { icon: '',  label: 'Close Others', disabled: others.length === 0, fn: function() { others.forEach(function(t) { closeTab(t.name); }); } },
+    { icon: '',  label: 'Close All',    fn: function() { S.tabs.slice().forEach(function(t) { closeTab(t.name); }); } },
+    null,
+    { icon: '✏', label: 'Rename…',     fn: function() { activateTab(name); renameScript(name); } },
+    { icon: '🗑', label: 'Delete',      danger: true, fn: function() { activateTab(name); deleteScript(name); } },
+  ], x, y);
 }
 
 // ── Diagnostics ────────────────────────────────────────────────────
@@ -871,6 +953,7 @@ function initKeyboard() {
     if (ctrl && ev.key === 'Enter') { ev.preventDefault(); runScript(); }
     if (ctrl && ev.shiftKey && ev.key === 'R') { ev.preventDefault(); reloadScript(); }
     if (ev.key === 'Escape') {
+      ctxMenu.hide();
       var overlay = el('cmd-overlay');
       if (overlay && overlay.classList.contains('open')) { ev.preventDefault(); closeCommandPalette(); }
     }
@@ -906,10 +989,33 @@ function appendOutput(msg, type) {
   container.scrollTop = container.scrollHeight;
 }
 
+// ── Context menu wiring ────────────────────────────────────────────
+function initContextMenus() {
+  var list = el('script-list');
+  if (list) {
+    list.addEventListener('contextmenu', function(ev) {
+      var item = ev.target.closest('.script-item');
+      if (!item) return;
+      ev.preventDefault();
+      showScriptCtxMenu(item.dataset.name, ev.clientX, ev.clientY);
+    });
+  }
+  var tabs = el('tabs');
+  if (tabs) {
+    tabs.addEventListener('contextmenu', function(ev) {
+      var tab = ev.target.closest('.editor-tab');
+      if (!tab) return;
+      ev.preventDefault();
+      showTabCtxMenu(tab.dataset.name, ev.clientX, ev.clientY);
+    });
+  }
+}
+
 // ── Boot ───────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', function() {
   initKeyboard();
   initResize();
+  initContextMenus();
   showBottomTab('problems');
   initAuth();
 });
