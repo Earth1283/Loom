@@ -1,0 +1,18 @@
+{
+  "env": {
+    "JAVA_HOME": "/home/codespace/java/21.0.10-ms"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"\nimport sys, json\nd = json.load(sys.stdin)\ncmd = d.get('command', '')\nif 'gradlew' in cmd and 'setup.sh' not in cmd:\n    d['command'] = 'source /workspaces/Loom/setup.sh && ' + cmd\n    print(json.dumps({'action': 'modify', 'input': d}))\n\""
+          }
+        ]
+      }
+    ]
+  }
+}
