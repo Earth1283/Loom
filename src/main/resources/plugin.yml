@@ -1,0 +1,8 @@
+name: Loom
+version: '${version}'
+
+main: io.github.earth1283.loom.Loom
+api-version: '1.21'
+load: STARTUP
+
+authors: [ Earth1283 ]
