@@ -25,7 +25,7 @@ class Loom : JavaPlugin() {
         logger.info("Loom v${description.version}  starting up…")
         logger.info(bar)
 
-        // ── Config ────────────────────────────────────────────────
+        // Config
         logger.info("Loading configuration…")
         saveDefaultConfig()
         loomConfig = LoomConfig.from(config)
@@ -37,16 +37,16 @@ class Loom : JavaPlugin() {
         logger.info("  Ops only   : ${loomConfig.allowedOpsOnly}")
         if (loomConfig.debugMode) logger.info("  Debug mode : ON")
 
-        // ── Script engine ─────────────────────────────────────────
+        // Script engine
         logger.info("Initialising script engine…")
         val scriptsDir = File(dataFolder, "scripts")
         scriptManager = ScriptManager(this, scriptsDir)
         scriptManager.init()
 
-        // ── Auth ──────────────────────────────────────────────────
+        // Auth
         authManager = AuthManager()
 
-        // ── Web server ────────────────────────────────────────────
+        // Web server
         if (loomConfig.webEnabled) {
             logger.info("Starting web server on ${loomConfig.webHost}:${loomConfig.webPort}…")
             webServer = WebServer(loomConfig, scriptManager, authManager, this, logger)
@@ -55,7 +55,7 @@ class Loom : JavaPlugin() {
             logger.info("Web server is disabled — skipping.")
         }
 
-        // ── Commands & listeners ──────────────────────────────────
+        // Commands & listeners
         logger.info("Registering commands and event listeners…")
         val loomCmd = LoomCommand(scriptManager, authManager, loomConfig, webServer)
         getCommand("loom")?.setExecutor(loomCmd)
@@ -63,7 +63,7 @@ class Loom : JavaPlugin() {
         server.pluginManager.registerEvents(LoomEventListener(scriptManager), this)
         server.pluginManager.registerEvents(ScriptCommandListener(scriptManager), this)
 
-        // ── Summary ───────────────────────────────────────────────
+        // Summary
         val all = scriptManager.all()
         val running = all.values.count { it.state == io.github.earth1283.loom.api.LoomScript.State.RUNNING }
         val errors  = all.values.count { it.state == io.github.earth1283.loom.api.LoomScript.State.ERROR  }

@@ -32,14 +32,14 @@ const API = {
   }
 };
 
-// ── State ─────────────────────────────────────────────────────────
+// State
 let editor = null;
 let ws = null;
 let currentScript = null;
 let diagnosticDecorations = [];
 let validateTimeout = null;
 
-// ── Modal dialogs ─────────────────────────────────────────────────
+// Modal dialogs
 function showDialog({ message, input = false, defaultValue = '', okLabel = 'OK', dangerOk = false }) {
   return new Promise(resolve => {
     const overlay  = document.getElementById('modal-overlay');
@@ -86,7 +86,7 @@ function showConfirm(message, dangerOk = false) {
   return showDialog({ message, okLabel: dangerOk ? 'Delete' : 'Confirm', dangerOk });
 }
 
-// ── Auth ──────────────────────────────────────────────────────────
+// Auth
 async function initAuth() {
   const stored = sessionStorage.getItem('loom_session');
   if (stored) {
@@ -136,7 +136,7 @@ function hideAuthOverlay() {
   refreshScripts();
 }
 
-// ── Monaco ────────────────────────────────────────────────────────
+// Monaco
 function initEditor() {
   require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } });
   require(['vs/editor/editor.main'], function(monaco) {
@@ -211,7 +211,7 @@ function initEditor() {
   });
 }
 
-// ── WebSocket ─────────────────────────────────────────────────────
+// WebSocket
 function initWebSocket() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws/${API.sessionId}`);
@@ -228,7 +228,7 @@ function initWebSocket() {
   };
 }
 
-// ── Script list ───────────────────────────────────────────────────
+// Script list
 async function refreshScripts() {
   try {
     const list = await API.get('/scripts');
@@ -256,7 +256,7 @@ async function openScript(name) {
   } catch (err) { appendOutput('Error opening script: ' + err.message); }
 }
 
-// ── Toolbar actions ───────────────────────────────────────────────
+// Toolbar actions
 async function saveScript() {
   if (!currentScript || !editor) return;
   const source = editor.getValue();
@@ -322,7 +322,7 @@ function defaultSource(name) {
   return `script "${name}" {\n  on PlayerJoin(player) {\n    player.message("Hello, \${player.name}!")\n  }\n}`;
 }
 
-// ── Validation ────────────────────────────────────────────────────
+// Validation
 async function validateCurrent() {
   if (!currentScript || !editor || !window.monaco) return;
   const source = editor.getValue();
@@ -362,7 +362,7 @@ function showDiagnostics(diags) {
   }
 }
 
-// ── Git log panel ─────────────────────────────────────────────────
+// Git log panel
 async function loadGitLog(name) {
   try {
     const commits = await API.get('/git/' + name + '/log');
@@ -396,7 +396,7 @@ function showGit() {
   if (currentScript) loadGitLog(currentScript);
 }
 
-// ── UI helpers ────────────────────────────────────────────────────
+// UI helpers
 function showTab(name) {
   ['diagnostics', 'git', 'output'].forEach(t => {
     document.getElementById('tab-' + t).style.display = t === name ? '' : 'none';
@@ -422,7 +422,7 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── Boot ──────────────────────────────────────────────────────────
+// Boot
 window.addEventListener('DOMContentLoaded', () => {
   initAuth();
   // default tab

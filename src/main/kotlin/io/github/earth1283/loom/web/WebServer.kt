@@ -288,22 +288,22 @@ class WebServer(
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
     :root {
-      --bg:          #0b0c0f;
-      --surface-1:   #101117;
-      --surface-2:   #181921;
-      --surface-3:   #1e2030;
-      --border:      #22253a;
-      --border-hi:   #32364f;
+      --bg:          #13141e;
+      --surface-1:   #1a1c2b;
+      --surface-2:   #20223a;
+      --surface-3:   #272a42;
+      --border:      #2c3050;
+      --border-hi:   #3a3f62;
       --accent:      #5b8af0;
-      --accent-dim:  rgba(91,138,240,0.12);
-      --accent-glow: rgba(91,138,240,0.25);
+      --accent-dim:  rgba(91,138,240,0.15);
+      --accent-glow: rgba(91,138,240,0.3);
       --teal:        #3dd6c0;
       --error:       #ff4d6a;
       --warn:        #f5a623;
       --success:     #3dcc8f;
-      --text-1:      #e6e8f2;
-      --text-2:      #8a8faa;
-      --text-3:      #4a4f68;
+      --text-1:      #e8eaf4;
+      --text-2:      #9298ba;
+      --text-3:      #5a6080;
       --font-ui:     'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       --font-mono:   'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
       --r:           6px;
